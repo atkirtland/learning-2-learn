@@ -7,6 +7,7 @@ import tensorflow as tf
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import init_ops
 
+from opt_tools import AdamOptimizer_withProjection
 
 #############################################################################
 # Random Orthogonal weight matrix generator #
@@ -109,12 +110,10 @@ class customRNNCell(object):
                 w_rec0 = self._w_rec_start*gen_ortho_matrix(n_rnn, rng=self.rng) # VG - No normalization by sqrt(n_hidden) here??
             elif self._w_rec_init == 'randgauss':
                 w_rec0 = self._w_rec_start*self.rng.randn(n_rnn, n_rnn)/np.sqrt(n_rnn)
+            
+            matrix0 = np.concatenate((w_in2rnn0, w_rec0), axis=0)
+            self._kernel = tf.compat.v1.get_variable('leakyRNN_kernel', dtype=tf.float32, shape=[n_input+n_rnn, n_rnn], initializer=tf.constant_initializer(matrix0))
 
-            self.in2rnn = tf.compat.v1.get_variable('RNNin_weights', dtype=tf.float32, shape=[n_input, n_rnn],
-                                           initializer=tf.constant_initializer(w_in2rnn0))
-
-            self._kernel = tf.compat.v1.get_variable('leakyRNN_weights', dtype=tf.float32, shape=[n_rnn, n_rnn],
-                                           initializer=tf.constant_initializer(w_rec0))
             self._bias = tf.compat.v1.get_variable('leakyRNN_biases', dtype=tf.float32,
                                          shape=[n_rnn],
                                          initializer=init_ops.constant_initializer(self._bias_start))
@@ -142,10 +141,9 @@ class customRNNCell(object):
 
         # Single-timestep update of state
         with tf.compat.v1.variable_scope("compute", reuse=self._reuse):
-            incs = tf.matmul(stims, self.in2rnn)
             new_noise = (1.0-self._alpha_noise)*OUnoise + tf.random.normal(tf.shape(states), mean=0, stddev=np.sqrt(2.0*self._alpha_noise)*self._sigma, dtype=tf.float32)
             new_states = (1.0 - self._alpha) * states + \
-                         self._alpha * self._activation(incs + tf.matmul(states, self._kernel) + self._bias + new_noise)
+                         self._alpha * self._activation(tf.matmul(array_ops.concat([stims, states], 1), self._kernel) + self._bias + new_noise)
 
             ret_states = new_states
             ret_noise = new_noise
@@ -253,6 +251,7 @@ class Model(object):
         self.y_hat = tf.nn.softmax(self.y_hat_)
 
     # Setup optimization
+    # this function `optimize` is similar to `_build` in LDLabs' code
     def optimize(self, config):
 
         # Update loss
@@ -278,6 +277,13 @@ class Model(object):
         print([v.name for v in self.var_list])
         print([v.name for v in self.full_var_list])
 
+        for v in self.var_list:
+            if 'leakyRNN_kernel' in v.name:
+                print(v.name)
+                n_input = config['num_input']
+                self.w_rec = v[n_input:, :]
+                self.w_in = v[:n_input, :]
+
         self.vName = []
         for v in self.full_var_list:
             name = v.name.split('/')[-1]
@@ -286,7 +292,7 @@ class Model(object):
 
         # Input weight regularizer
         if config['l2_wI'] > 0:
-            self.wNormI = tf.reduce_mean([tf.reduce_mean(tf.square(v)) for v in self.var_list if ('RNNin_weights' in v.name)])
+            self.wNormI = tf.reduce_mean([tf.reduce_mean(tf.square(self.w_in))])
             self.cost_reg_rnn += config['l2_wI'] * (self.wNormI)
 
         # Output weight regularizer
@@ -294,11 +300,11 @@ class Model(object):
             self.wNormO = tf.reduce_mean([tf.reduce_mean(tf.square(v)) for v in self.var_list if ('out_RNN_weights' in v.name)])
             self.cost_reg_rnn += config['l2_wO'] * (self.wNormO)
 
-        self.wNormR2 = tf.reduce_mean([tf.reduce_mean(tf.square(v)) for v in self.var_list if ('leakyRNN_weights' in v.name)])
+        self.wNormR2 = tf.reduce_mean([tf.reduce_mean(tf.square(self.w_rec))])
         self.hMax   = tf.reduce_max(self.states)
 
         # Recurrent weight regularizer
-        recWts = [v for v in self.var_list if ('leakyRNN_weights' in v.name)]
+        recWts = [self.w_rec]
         self.sings = tf.linalg.svd(recWts[0], compute_uv=False)
         self.maxSingVal = tf.reduce_max(self.sings)
         self.topTenSings = self.sings[:10]
@@ -307,12 +313,27 @@ class Model(object):
             self.cost_reg_rnn += config['l2_wR'] * (self.wNormR)#-self.lWRTargVar)
 
         # Setup Optimizer - ADAM
-        self.opt_full = tf.compat.v1.train.AdamOptimizer(learning_rate=self.learning_rate_full, beta1=0.3)
-        cost_full = self.cost_lsq_rnn + self.cost_reg_rnn
-        self.buildOpt(config, cost_full)
+        if config['projGrad']:
+            self.opt_full = AdamOptimizer_withProjection(learning_rate=self.learning_rate_full, beta2=(1 - 9e-8))
+        else:
+            self.opt_full = tf.compat.v1.train.AdamOptimizer(learning_rate=self.learning_rate_full, beta1=0.3)
+
+        self.buildOpt(config)
+
+        # Re-init network state
+        # Moved from `buildOpt` in original code, TODO okay?
+        self.reinit_fullOpt = tf.compat.v1.initialize_variables(self.opt_full.variables())
+        with tf.compat.v1.variable_scope("", reuse=True):
+            self.initState = tf.compat.v1.get_variable("leakyRNN_init_state")
+            Sup = tf.compat.v1.assign(self.initState, tf.nn.relu(self.initState))
+
+        with tf.control_dependencies([Sup]):
+            self.optimizer_full = tf.group([self.optimizer_full])
 
     # Backward pass
-    def buildOpt(self, config, cost_full):
+    # This function `buildOpt` is similar to `set_optimizer` in LDLabs' code
+    def buildOpt(self, config, activity_proj=None, input_proj=None, output_proj=None, recurrent_proj=None, taskNumber=0):
+        cost_full = self.cost_lsq_rnn + self.cost_reg_rnn
         self.full_grads_and_vars = self.opt_full.compute_gradients(cost_full, self.full_var_list)
         # gradient clipping
         vars = [x[1] for x in self.full_grads_and_vars]
@@ -321,16 +342,10 @@ class Model(object):
         capped_gvs_full = zip(clipped_grads, vars)
 
         # Apply parameter updates
-        self.optimizer_full = self.opt_full.apply_gradients(capped_gvs_full)
-
-        # Re-init network state
-        self.reinit_fullOpt = tf.compat.v1.initialize_variables(self.opt_full.variables())
-        with tf.compat.v1.variable_scope("", reuse=True):
-            self.initState = tf.compat.v1.get_variable("leakyRNN_init_state")
-            Sup = tf.compat.v1.assign(self.initState, tf.nn.relu(self.initState))
-
-        with tf.control_dependencies([Sup]):
-            self.optimizer_full = tf.group([self.optimizer_full])
+        if config['projGrad']:
+            self.optimizer_full = self.opt_full.apply_gradients(capped_gvs_full, activity_proj, input_proj, output_proj, recurrent_proj, taskNumber)
+        else:
+            self.optimizer_full = self.opt_full.apply_gradients(capped_gvs_full)
 
     # Initialize model
     def initialize(self, sess=None):

@@ -11,6 +11,8 @@ import math
 from network import Model
 from enum import Enum
 
+from seq_tools import compute_projection_matrices, compute_covariance
+
 runType = Enum('runType', ['Full', 'DSManifPert', 'SSManifPert','ControlManifPert'])
 
 
@@ -142,6 +144,7 @@ def generateData(config, images = None, test = False, stim = None):
     if images is None:
         if test:
             raise Exception('No images provided during testing')
+        # [2, 10]
         images = config['rng'].normal(size=[config['num_rnn_out']-1] + config['image_shape']).astype(np.float32)
         for stim in range(config['num_rnn_out']-1):
             images[stim,:] = images[stim,:]/np.linalg.norm(images[stim,:])
@@ -229,6 +232,8 @@ def train(seed          = 0,
     if config['runType'] != runType.Full:
         config['max_tasks'] = 101
 
+    config['alpha_projection'] = 1e-3
+    config['projGrad'] = False
 
     lrFull = config['init_lr_full']
 
@@ -269,7 +274,18 @@ def train(seed          = 0,
         singVals = np.zeros([config['max_tasks'],100])
         images = None
         firstConv = False
+
+        if config['projGrad']:
+            input_proj = tf.zeros((config['num_rnn'] + config['num_input'], config['num_rnn'] + config['num_input']))
+            activity_proj = tf.zeros((config['num_rnn'], config['num_rnn']))
+            output_proj = tf.zeros((config['num_rnn_out'], config['num_rnn_out']))
+            recurrent_proj = tf.zeros((config['num_rnn'], config['num_rnn']))
+
         for trial in range(config['training_iters']):
+            # set optimizer for each new task
+            if config['projGrad'] and (images is None):
+                model.buildOpt(config, activity_proj=activity_proj, input_proj=input_proj, output_proj=output_proj, recurrent_proj=recurrent_proj, taskNumber=len(convCnt))
+
             # Generate a batch of trials
             stims, trials, images = generateData(config, images)
             trIm.extend(stims.tolist())
@@ -303,9 +319,51 @@ def train(seed          = 0,
             else:
                 taskFailed = False
 
-            
             # Saved trained model for new problem
             if (len(perf) > 50 and np.mean(perf[-50:]) < 0.005) or taskFailed:
+
+                if config['projGrad']:
+                    # Generate a batch of trials
+                    stims, trials, images = generateData(config, images)
+                    trIm.extend(stims.tolist())
+
+                    # Generate feed_dict
+                    feed_dict = {model.x: trials['x'],
+                                model.y_rnn: trials['y_rnn'],
+                                model.y_rnn_mask: trials['y_rnn_mask']}
+
+                    eval_h, eval_x, eval_y, Win, Wrec = sess.run([model.states, model.x, model.y_rnn, model.w_in, model.w_rec], feed_dict=feed_dict)
+                    eval_h = np.expand_dims(eval_h, axis=1)
+                    eval_x = np.tile(eval_x, (2000,1,1))
+                    eval_y = np.expand_dims(eval_y, axis=1)
+
+                    full_state = np.concatenate([eval_x, eval_h], -1)
+                    Wfull = np.concatenate([Win, Wrec], 0)
+
+                    # joint covariance matrix of input and activity
+                    Shx_task = compute_covariance(np.reshape(full_state, (-1, config['num_rnn'] + config['num_input'])).T)
+
+                    # covariance matrix of output
+                    Sy_task = compute_covariance(np.reshape(eval_y, (-1, config['num_rnn_out'])).T)
+
+                    # get block matrices from Shx_task
+                    # Sh_task = Shx_task[-hp['n_rnn']:, -hp['n_rnn']:]
+                    Sh_task = np.matmul(np.matmul(Wfull.T, Shx_task), Wfull)
+
+                    # ---------- update stored covariance matrices for continual learning -------
+                    taskNumber = len(convCnt)
+                    if taskNumber == 0:
+                        input_cov = Shx_task
+                        activity_cov = Sh_task
+                        output_cov = Sy_task
+                    else:
+                        input_cov = taskNumber / (taskNumber + 1) * input_cov + Shx_task / (taskNumber + 1)
+                        activity_cov = taskNumber / (taskNumber + 1) * activity_cov + Sh_task / (taskNumber + 1)
+                        output_cov = taskNumber / (taskNumber + 1) * output_cov + Sy_task / (taskNumber + 1)
+
+                    # ---------- update projection matrices for continual learning ----------
+                    activity_proj, input_proj, output_proj, recurrent_proj = compute_projection_matrices(activity_cov, input_cov, output_cov, input_cov[-config['num_rnn']:, -config['num_rnn']:], config["alpha_projection"])
+
                 if taskFailed: # Update problem learning-specific stats when convergence fails
                     convCnt.append(np.nan)
                     wNormR.append(np.nan)
@@ -372,10 +430,13 @@ def train(seed          = 0,
                 
                 sys.stdout.flush()
 
-                if config['runType'] == runType.Full:
-                    # Finalize graph after homeostatic set point is set
-                    if len(convCnt) == 1:
-                        sess.graph.finalize()
+                # The orthogonalization code runs if this is commented out (otherwise I get an error about the graph already being finalized.)
+                # It seems like it's okay to comment out as long as the code runs on a single thread?
+                # https://www.tensorflow.org/api_docs/python/tf/Graph#finalize
+                # if config['runType'] == runType.Full:
+                #     # Finalize graph after homeostatic set point is set
+                #     if len(convCnt) == 1:
+                #         sess.graph.finalize()
 
                 # Reset problem specific stats for new problem
                 perf = []
@@ -388,7 +449,7 @@ def train(seed          = 0,
                 trIm = []
                 images = None # This initiates sampling of new images for next problem
                 
-                # Reset adam's internals before onset of leaarning new problem
+                # Reset adam's internals before onset of learning new problem
                 model.resetOpt(sess)
 
             # Done learning all problems?
