@@ -186,12 +186,16 @@ def train(seed          = 0,
           l2_wR          = 0.001,
           l2_wI          = 0.0001,
           l2_wO          = 0.1,
-          learningRateInit = 0.0001,
+          learningRateInit = 0.001,
+          beta1 = 0.9,
+          beta2 = 0.999,
           svBnd = 10.0,
           rType = runType.Full,
+          projGrad = True,
+          originalAdam = False,
           **kwargs):
 
-    save_name = '{:d}_{:f}_{:f}_{:f}_{:f}_{:f}_{:f}_{:s}'.format(seed, learningRateInit, l2_wR, l2_wI, l2, l2_wO, svBnd, rType)
+    save_name = '{:d}_{:d}_{:d}_{:f}_{:f}_{:f}_{:s}'.format(seed, projGrad, originalAdam, learningRateInit, beta1, beta2, rType)
                                     
     # Set random seed
     rng = np.random.RandomState(seed)
@@ -209,6 +213,8 @@ def train(seed          = 0,
     config['l2_wO'] = l2_wO
 
     config['init_lr_full'] = learningRateInit
+    config['beta1'] = beta1
+    config['beta2'] = beta2
 
     # Allow for additional configuration options
     for key, val in kwargs.items():
@@ -233,7 +239,8 @@ def train(seed          = 0,
         config['max_tasks'] = 101
 
     config['alpha_projection'] = 1e-3
-    config['projGrad'] = False
+    config['projGrad'] = projGrad
+    config['originalAdam'] = originalAdam
 
     lrFull = config['init_lr_full']
 
@@ -466,15 +473,3 @@ def train(seed          = 0,
     np.savetxt(os.path.join('data', 'hNorm_' + config['save_name'] + '.txt'), np.array(hNorm), fmt='%12.9f', delimiter=' ')
     np.savetxt(os.path.join('data', 'HM_' + config['save_name']  + '.txt'), np.array(HM), fmt='%12.9f', delimiter=' ')
     np.savetxt(os.path.join('data', 'SINGS_' + config['save_name']  + '.txt'), singVals, fmt='%12.9f', delimiter=' ')
-
-
-if __name__ == '__main__':
-    train(seed          = 0,
-          batchSize     = 1,
-          l2            = 0.0005,
-          l2_wR          = 0.001,
-          l2_wI          = 0.0001,
-          l2_wO          = 0.1,
-          learningRateInit = 0.0001,
-          svBnd = 10.0,
-          rType = runType.Full)

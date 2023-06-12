@@ -7,7 +7,7 @@ import tensorflow as tf
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import init_ops
 
-from opt_tools import AdamOptimizer_withProjection
+from opt_tools import AdamOptimizer_withProjection, AdamOptimizer_withoutProjection
 
 #############################################################################
 # Random Orthogonal weight matrix generator #
@@ -314,9 +314,12 @@ class Model(object):
 
         # Setup Optimizer - ADAM
         if config['projGrad']:
-            self.opt_full = AdamOptimizer_withProjection(learning_rate=self.learning_rate_full, beta2=(1 - 9e-8))
+            self.opt_full = AdamOptimizer_withProjection(learning_rate=self.learning_rate_full, beta1=config["beta1"], beta2=config["beta2"])
         else:
-            self.opt_full = tf.compat.v1.train.AdamOptimizer(learning_rate=self.learning_rate_full, beta1=0.3)
+            if config["originalAdam"]:
+                self.opt_full = tf.compat.v1.train.AdamOptimizer(learning_rate=self.learning_rate_full, beta1=config["beta1"], beta2=config["beta2"])
+            else: 
+                self.opt_full = AdamOptimizer_withoutProjection(learning_rate=self.learning_rate_full, beta1=config["beta1"], beta2=config["beta2"])
 
         self.buildOpt(config)
 
