@@ -1,11 +1,10 @@
 import sys
 sys.path.append(".")
 
-from train import train
-from train import runType
+from trainNoTrim import train, runType
 
 if __name__ == '__main__':
-    train(seed          = 0,
+    train(seed          = 1,
           batchSize     = 1,
           l2            = 0.0005,
           l2_wR          = 0.001,

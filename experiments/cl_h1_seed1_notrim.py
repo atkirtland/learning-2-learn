@@ -1,11 +1,10 @@
 import sys
 sys.path.append(".")
 
-from train import train
-from train import runType
+from trainNoTrim import train, runType
 
 if __name__ == '__main__':
-    train(seed          = 0,
+    train(seed          = 1,
           batchSize     = 1,
           l2            = 0.0005,
           l2_wR          = 0.001,
@@ -14,9 +13,8 @@ if __name__ == '__main__':
           svBnd = 10.0,
           rType = runType.Full,
 
-          projGrad = False,
-          originalAdam = False,
+          projGrad = True,
           learningRateInit = 0.001,
           beta1 = 0.9,
           beta2 = 0.999,
-          maxTasks = 30)
+          maxTasks=30)

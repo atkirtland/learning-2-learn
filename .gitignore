@@ -1,4 +1,6 @@
 __pycache__/
-data/
+data*/
 *.log
 logs/
+temp/
+*.txt

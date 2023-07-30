@@ -5,7 +5,7 @@ from train import train
 from train import runType
 
 if __name__ == '__main__':
-    train(seed          = 0,
+    train(seed          = 2,
           batchSize     = 1,
           l2            = 0.0005,
           l2_wR          = 0.001,

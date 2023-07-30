@@ -12,7 +12,6 @@ from network import Model
 from enum import Enum
 
 from seq_tools import compute_projection_matrices, compute_covariance
-import pickle
 
 runType = Enum('runType', ['Full', 'DSManifPert', 'SSManifPert','ControlManifPert'])
 
@@ -125,7 +124,7 @@ def getStates(sess, config, model, images):
     st0 = dict()
     
     for stim in range(config['num_rnn_out']-1):
-        _, trials = generateData(config, images, test=True, stim=[stim])
+        _, trials,_ = generateData(config, images, test=True, stim=[stim])
     
         # Generate feed_dict
         feed_dict = {model.x: trials['x'],
@@ -193,16 +192,16 @@ def generateData(config, images = None, test = False, stim = None):
     tmp[np.arange(fixationOffset, fixationOffset+datasetSize*int(100/config['dt']))] = 0.0
     trials['y_rnn_mask'] = tmp.astype(bool)
 
-    return stims, trials
+    return stims, trials, images
 
 def test_input(config, sess, model, images, idx):
     # 1st output is stims
     # 3rd output is images
-    _, trials = generateData(config, images=images, test=True, stim=[idx])
+    _, trials, _ = generateData(config, images=images, test=True, stim=[idx])
 
-    feed_dict = {model.x: trials['x'],
-                 model.y_rnn: trials['y_rnn'],
-                 model.y_rnn_mask: trials['y_rnn_mask']}
+    feed_dict = {model.x: np.zeros(np.array(trials['x']).shape),
+                 model.y_rnn: np.zeros(np.array(trials['y_rnn']).shape),
+                 model.y_rnn_mask: np.zeros(np.array(trials['y_rnn_mask']).shape)}
 
     c_lsq = sess.run([model.cost_lsq_rnn], feed_dict=feed_dict)
 
@@ -225,9 +224,6 @@ def train(seed          = 0,
           originalAdam = False,
           maxTasks = None,
           **kwargs):
-    
-    debug_timing = False
-    debug_clmult = False
 
     save_name = '{:d}_{:d}_{:d}_{:f}_{:f}_{:f}_{:s}_matrices-test'.format(seed, projGrad, originalAdam, learningRateInit, beta1, beta2, rType)
                                     
@@ -336,26 +332,19 @@ def train(seed          = 0,
         for trial in range(config['training_iters']):
             # test on all images
             if (trial % 10 == 0) or (images is None):
-                for k, testImages in enumerate(images_all):
-                    c_lsq0 = test_input(config, sess, model, testImages, 0)
-                    c_lsq1 = test_input(config, sess, model, testImages, 1)
+                for k, images in enumerate(images_all):
+                    c_lsq0 = test_input(config, sess, model, images, 0)
+                    c_lsq1 = test_input(config, sess, model, images, 1)
                     perfs_all[k].append((c_lsq0[0], c_lsq1[0]))
                 perfs_all['trials'].append(trial)
 
             # set optimizer for each new task
             if config['projGrad'] and (images is None):
                 model.buildOpt(config, activity_proj=activity_proj, input_proj=input_proj, output_proj=output_proj, recurrent_proj=recurrent_proj, taskNumber=len(convCnt))
-            
-            if debug_timing:
-                print("buildOpt", time.time()-t_start)
 
             # Generate a batch of trials
             images = images_all[len(convCnt)]
-            stims, trials = generateData(config, images)
-            trIm.extend(stims.tolist())
-
-            if debug_timing:
-                print("generateData", time.time()-t_start)
+            stims, trials, images = generateData(config, images)
 
             # Generate feed_dict
             feed_dict = {model.x: trials['x'],
@@ -364,9 +353,6 @@ def train(seed          = 0,
 
             # Run forward + backward passes
             _, c_lsq, c_reg, wnR, wnR2, wnI, wnO, hn, hMax, out, maxSingVal, topTenSings = sess.run([model.optimizer_full, model.cost_lsq_rnn, model.cost_reg_rnn, model.wNormR, model.wNormR2, model.wNormI, model.wNormO, model.hNorm, model.hMax, model.y_hat, model.maxSingVal, model.topTenSings], feed_dict=feed_dict)
-
-            if debug_timing:
-                print("sess.run", time.time()-t_start)
 
             # Save trial specific learning stats
             perf.append(c_lsq)
@@ -388,16 +374,13 @@ def train(seed          = 0,
                 taskFailed = True
             else:
                 taskFailed = False
-            
-            if debug_timing:
-                print("next bit", time.time()-t_start)
 
             # Saved trained model for new problem
             if (len(perf) > 50 and np.mean(perf[-50:]) < 0.005) or taskFailed:
 
                 if config['projGrad']:
                     # Generate a batch of trials
-                    stims, trials = generateData(config, images)
+                    stims, trials, images = generateData(config, images)
 
                     # Generate feed_dict
                     feed_dict = {model.x: trials['x'],
@@ -412,24 +395,15 @@ def train(seed          = 0,
                     full_state = np.concatenate([eval_x, eval_h], -1)
                     Wfull = np.concatenate([Win, Wrec], 0)
 
-                    if debug_timing:
-                        print("generation", time.time()-t_start)
-
                     # joint covariance matrix of input and activity
                     Shx_task = compute_covariance(np.reshape(full_state, (-1, config['num_rnn'] + config['num_input'])).T)
-                    if debug_timing:
-                        print("Shx_task", time.time()-t_start)
 
                     # covariance matrix of output
                     Sy_task = compute_covariance(np.reshape(eval_y, (-1, config['num_rnn_out'])).T)
-                    if debug_timing:
-                        print("Sy_task", time.time()-t_start)
 
                     # get block matrices from Shx_task
                     # Sh_task = Shx_task[-hp['n_rnn']:, -hp['n_rnn']:]
                     Sh_task = np.matmul(np.matmul(Wfull.T, Shx_task), Wfull)
-                    if debug_timing:
-                        print("Sh_task", time.time()-t_start)
 
                     # ---------- update stored covariance matrices for continual learning -------
                     taskNumber = len(convCnt)
@@ -437,18 +411,6 @@ def train(seed          = 0,
                         input_cov = Shx_task
                         activity_cov = Sh_task
                         output_cov = Sy_task
-
-                        if debug_clmult:
-                            np.save('temp/eval_h.npy', eval_h)
-                            np.save('temp/eval_x.npy', eval_x)
-                            np.save('temp/eval_y.npy', eval_y)
-                            np.save('temp/Win.npy', Win)
-                            np.save('temp/Wrec.npy', Wrec)
-                            np.save('temp/full_state.npy', full_state)
-                            np.save('temp/Wfull.npy', Wfull)
-                            np.save('temp/Shx_task.npy', Shx_task)
-                            np.save('temp/Sy_task.npy', Sy_task)
-                            np.save('temp/Sh_task.npy', Sh_task)
                     else:
                         input_cov = taskNumber / (taskNumber + 1) * input_cov + Shx_task / (taskNumber + 1)
                         activity_cov = taskNumber / (taskNumber + 1) * activity_cov + Sh_task / (taskNumber + 1)
@@ -456,8 +418,6 @@ def train(seed          = 0,
 
                     # ---------- update projection matrices for continual learning ----------
                     activity_proj, input_proj, output_proj, recurrent_proj = compute_projection_matrices(activity_cov, input_cov, output_cov, input_cov[-config['num_rnn']:, -config['num_rnn']:], config["alpha_projection"])
-                    if debug_timing:
-                        print("compute_proj_matrices", time.time()-t_start)
 
                 if taskFailed: # Update problem learning-specific stats when convergence fails
                     convCnt.append(np.nan)
@@ -473,8 +433,6 @@ def train(seed          = 0,
                     # Dump trained model and problem specifics to file after it is learned
                     if len(convCnt) >= 1 and config['SAVE_PARAMS'] == True:
                         testAndSaveParams(sess, config, model, images, len(convCnt))
-                        with open(os.path.join('data', 'perfs_' + config['save_name'] + '_' + str(len(convCnt)) + '.pkl'),'wb') as file:
-                            pickle.dump(perfs_all, file)
 
                     # Save problem learning-specific stat summary
                     wNormR.append(np.mean(wNR[-50:]))
@@ -495,14 +453,6 @@ def train(seed          = 0,
                             model.save(len(convCnt))
                     currSingVals = sess.run([model.sings])
                     singVals[len(convCnt)-1,:] = currSingVals[0]
-
-                    if config['runType'] == runType.Full:
-                        if len(convCnt) <= 30:
-                            model.save(len(convCnt))
-
-                
-                if debug_timing:
-                    print("block1", time.time()-t_start)
 
                 if config['runType'] != runType.Full:  # for manifold perturbation only
                     st0 = getStates(sess, config, model, images)
@@ -556,9 +506,6 @@ def train(seed          = 0,
                 
                 # Reset adam's internals before onset of learning new problem
                 model.resetOpt(sess)
-
-                if debug_timing:
-                    print("end", time.time()-t_start)
 
             # Done learning all problems?
             if len(convCnt) >= config['max_tasks']:
