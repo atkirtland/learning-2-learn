@@ -17,8 +17,9 @@ import pickle
 runType = Enum('runType', ['Full', 'DSManifPert', 'SSManifPert','ControlManifPert'])
 
 
-# Set default configuration parameters
-def get_defaultconfig():
+# Set configuration parameters
+# these are all default parameters not set in argparse
+def getconfig(kwargs):
     config = {'rnn_type'    : 'LeakyRNN',  
               'activation'  : 'softplus',    # relu, softplus, tanh, elu
               'tau'         : 100,           # ms
@@ -26,20 +27,52 @@ def get_defaultconfig():
               'dt'          : 1,             # discretization time step
               'sigma_rec'   : 0.05,          # noise scale
               'w_rec_init'  : 'randortho',   # diag, randortho, randgauss
-              'l2_h'        : 0.0,           # firing rate / homeostatic regularizer weight
-              'l2_wR'        : 0.0,          # recurrent weight regularizer weight
-              'l2_wI'        : 0.0,          # input weight regularizer weight
-              'l2_wO'        : 0.0,          # output regulaizer weight
-              'seed'        : 0,             # Seed for network instance
-              'rng'         : None,
-              'save_name'   : 'test',
-              'init_lr_full': 0.0001,        # Learning Rate
-              'batch_size': 10,              # No. of trials to save at a time
               'training_iters' : 10000000,   # Max. number of trials to run
               'SAVE_PARAMS' : True           # Whether to save model parameters after each problem
     }
+
     config['alpha'] = np.float32(1.0 * config['dt'] / config['tau'])               # Discretization - network
     config['alpha_noise'] = np.float32(1.0 * config['dt'] / config['tau_noise'])   # Discretization - noise
+
+    config.update(kwargs)
+
+    # Set random seed
+    rng = np.random.RandomState(config['seed'])
+    config['rng']           = rng
+
+    save_name = '{:d}_{:d}_{:d}_{:f}_{:f}_{:f}_{:s}_matrices-test'.format(
+        config['seed'], 
+        config['projGrad'], 
+        config['originalAdam'], 
+        config['init_lr_full'], 
+        config['beta1'], 
+        config['beta2'], 
+        config['runType']
+    )
+    config['save_name']     = save_name
+
+    config['image_shape'] = [10]
+    config['num_input'] = np.prod(config['image_shape']) + 1 #Image + fixation stim
+    config['num_rnn'] = 100
+    config['num_rnn_out'] = 2 + 1 # Saccades + Fixation
+    config['fixationInput'] = 1.0/np.sqrt(np.prod(config['image_shape']))
+
+    # Trial duration parameters
+    config['tdim'] = int(2000/config['dt'])
+    config['stimPeriod']   = np.array([0, int(500/config['dt'])])
+    config['fixationPeriod']  = np.array([0, int(1500/config['dt'])])
+    config['decisionPeriod'] = np.array([int(1500/config['dt']), int(2000/config['dt'])])
+
+    if config['max_tasks'] is None:
+        config['max_tasks'] = 1001
+        if config['runType'] != runType.Full:
+            config['max_tasks'] = 101
+    
+    config['alpha_projection'] = 1e-3
+    
+    # Display configuration
+    for key, val in config.items():
+        print('{:20s} = '.format(key) + str(val))
 
     return config
 
@@ -158,16 +191,7 @@ def generateImages(config):
 def generateData(config, images = None, test = False, stim = None):
     # Draw new sample images at random and orthonormalize
     if images is None:
-        # if test:
         raise Exception('No images provided during testing')
-        # # [2, 10]
-        # images = config['rng'].normal(size=[config['num_rnn_out']-1] + config['image_shape']).astype(np.float32)
-        # for stim in range(config['num_rnn_out']-1):
-        #     images[stim,:] = images[stim,:]/np.linalg.norm(images[stim,:])
-        # proj = np.dot(images[0, :], images[1, :])
-        # images[1, :] -= proj*images[0, :]
-        # for stim in range(config['num_rnn_out']-1):
-        #     images[stim,:] = images[stim,:]/np.linalg.norm(images[stim,:])
 
     # Create input (x) and target (y_rnn) and output temporal mask (y_rnn_mask) matrices
     trials = dict()
@@ -210,85 +234,13 @@ def test_input(config, sess, model, images, idx):
 
 
 # Generate model and train network
-def train(seed          = 0,
-          batchSize     = 1,
-          l2            = 0.0005,
-          l2_wR          = 0.001,
-          l2_wI          = 0.0001,
-          l2_wO          = 0.1,
-          learningRateInit = 0.001,
-          beta1 = 0.9,
-          beta2 = 0.999,
-          svBnd = 10.0,
-          rType = runType.Full,
-          projGrad = True,
-          originalAdam = False,
-          maxTasks = None,
-          **kwargs):
-    
-    debug_timing = False
-    debug_clmult = False
+def train(**kwargs):
 
-    save_name = '{:d}_{:d}_{:d}_{:f}_{:f}_{:f}_{:s}_matrices-test'.format(seed, projGrad, originalAdam, learningRateInit, beta1, beta2, rType)
-                                    
-    # Set random seed
-    rng = np.random.RandomState(seed)
-
-    # Setup hyper-parameters
-    config = get_defaultconfig()
-    config['seed']          = seed
-    config['batch_size']    = batchSize
-    config['rng']           = rng
-    config['save_name']     = save_name
-    config['l2_h'] = l2
-    config['l2_wR'] = l2_wR
-    config['svBnd'] = svBnd
-    config['l2_wI'] = l2_wI
-    config['l2_wO'] = l2_wO
-
-    config['init_lr_full'] = learningRateInit
-    config['beta1'] = beta1
-    config['beta2'] = beta2
-
-    # Allow for additional configuration options
-    for key, val in kwargs.items():
-        config[key] = val
-
-    config['image_shape'] = [10]
-    config['num_input'] = np.prod(config['image_shape']) + 1 #Image + fixation stim
-    config['num_rnn'] = 100
-    config['num_rnn_out'] = 2 + 1 # Saccades + Fixation
-    config['fixationInput'] = 1.0/np.sqrt(np.prod(config['image_shape']))
-
-
-    # Trial duration parameters
-    config['tdim'] = int(2000/config['dt'])
-    config['stimPeriod']   = np.array([0, int(500/config['dt'])])
-    config['fixationPeriod']  = np.array([0, int(1500/config['dt'])])
-    config['decisionPeriod'] = np.array([int(1500/config['dt']), int(2000/config['dt'])])
-
-    config['runType'] = rType
-
-    if maxTasks:
-        config['max_tasks'] = maxTasks
-    else:
-        config['max_tasks'] = 1001
-        if config['runType'] != runType.Full:
-            config['max_tasks'] = 101
-    
-    images_all = generateImages(config)
-
-    config['alpha_projection'] = 1e-3
-    config['projGrad'] = projGrad
-    config['originalAdam'] = originalAdam
-
-    lrFull = config['init_lr_full']
-
-    # Display configuration
-    for key, val in config.items():
-        print('{:20s} = '.format(key) + str(val))
+    config = getconfig(kwargs)
 
     t_start = time.time()
+
+    images_all = generateImages(config)
 
     if config['runType'] != runType.Full: # for manifold perturbation only
         saveStates = np.zeros((config['num_rnn'], config['tdim'], 100))
@@ -335,7 +287,7 @@ def train(seed          = 0,
 
         for trial in range(config['training_iters']):
             # test on all images
-            if (trial % 10 == 0) or (images is None):
+            if (trial % 25 == 0) or (images is None):
                 for k, testImages in enumerate(images_all):
                     c_lsq0 = test_input(config, sess, model, testImages, 0)
                     c_lsq1 = test_input(config, sess, model, testImages, 1)
@@ -346,7 +298,7 @@ def train(seed          = 0,
             if config['projGrad'] and (images is None):
                 model.buildOpt(config, activity_proj=activity_proj, input_proj=input_proj, output_proj=output_proj, recurrent_proj=recurrent_proj, taskNumber=len(convCnt))
             
-            if debug_timing:
+            if config['debug_timing']:
                 print("buildOpt", time.time()-t_start)
 
             # Generate a batch of trials
@@ -354,7 +306,7 @@ def train(seed          = 0,
             stims, trials = generateData(config, images)
             trIm.extend(stims.tolist())
 
-            if debug_timing:
+            if config['debug_timing']:
                 print("generateData", time.time()-t_start)
 
             # Generate feed_dict
@@ -365,7 +317,7 @@ def train(seed          = 0,
             # Run forward + backward passes
             _, c_lsq, c_reg, wnR, wnR2, wnI, wnO, hn, hMax, out, maxSingVal, topTenSings = sess.run([model.optimizer_full, model.cost_lsq_rnn, model.cost_reg_rnn, model.wNormR, model.wNormR2, model.wNormI, model.wNormO, model.hNorm, model.hMax, model.y_hat, model.maxSingVal, model.topTenSings], feed_dict=feed_dict)
 
-            if debug_timing:
+            if config['debug_timing']:
                 print("sess.run", time.time()-t_start)
 
             # Save trial specific learning stats
@@ -389,12 +341,16 @@ def train(seed          = 0,
             else:
                 taskFailed = False
             
-            if debug_timing:
+            if config['debug_timing']:
                 print("next bit", time.time()-t_start)
 
             # Saved trained model for new problem
-            if (len(perf) > 50 and np.mean(perf[-50:]) < 0.005) or taskFailed:
 
+            if config['overtraining']:
+                condition = (len(perf) >= config['trialsPerTask']) or taskFailed
+            else:
+                condition = (len(perf) > 50 and np.mean(perf[-50:]) < 0.005) or taskFailed
+            if condition:
                 if config['projGrad']:
                     # Generate a batch of trials
                     stims, trials = generateData(config, images)
@@ -412,23 +368,23 @@ def train(seed          = 0,
                     full_state = np.concatenate([eval_x, eval_h], -1)
                     Wfull = np.concatenate([Win, Wrec], 0)
 
-                    if debug_timing:
+                    if config['debug_timing']:
                         print("generation", time.time()-t_start)
 
                     # joint covariance matrix of input and activity
                     Shx_task = compute_covariance(np.reshape(full_state, (-1, config['num_rnn'] + config['num_input'])).T)
-                    if debug_timing:
+                    if config['debug_timing']:
                         print("Shx_task", time.time()-t_start)
 
                     # covariance matrix of output
                     Sy_task = compute_covariance(np.reshape(eval_y, (-1, config['num_rnn_out'])).T)
-                    if debug_timing:
+                    if config['debug_timing']:
                         print("Sy_task", time.time()-t_start)
 
                     # get block matrices from Shx_task
                     # Sh_task = Shx_task[-hp['n_rnn']:, -hp['n_rnn']:]
                     Sh_task = np.matmul(np.matmul(Wfull.T, Shx_task), Wfull)
-                    if debug_timing:
+                    if config['debug_timing']:
                         print("Sh_task", time.time()-t_start)
 
                     # ---------- update stored covariance matrices for continual learning -------
@@ -438,7 +394,7 @@ def train(seed          = 0,
                         activity_cov = Sh_task
                         output_cov = Sy_task
 
-                        if debug_clmult:
+                        if config['debug_clmult']:
                             np.save('temp/eval_h.npy', eval_h)
                             np.save('temp/eval_x.npy', eval_x)
                             np.save('temp/eval_y.npy', eval_y)
@@ -456,7 +412,7 @@ def train(seed          = 0,
 
                     # ---------- update projection matrices for continual learning ----------
                     activity_proj, input_proj, output_proj, recurrent_proj = compute_projection_matrices(activity_cov, input_cov, output_cov, input_cov[-config['num_rnn']:, -config['num_rnn']:], config["alpha_projection"])
-                    if debug_timing:
+                    if config['debug_timing']:
                         print("compute_proj_matrices", time.time()-t_start)
 
                 if taskFailed: # Update problem learning-specific stats when convergence fails
@@ -501,7 +457,7 @@ def train(seed          = 0,
                             model.save(len(convCnt))
 
                 
-                if debug_timing:
+                if config['debug_timing']:
                     print("block1", time.time()-t_start)
 
                 if config['runType'] != runType.Full:  # for manifold perturbation only
@@ -557,7 +513,7 @@ def train(seed          = 0,
                 # Reset adam's internals before onset of learning new problem
                 model.resetOpt(sess)
 
-                if debug_timing:
+                if config['debug_timing']:
                     print("end", time.time()-t_start)
 
             # Done learning all problems?

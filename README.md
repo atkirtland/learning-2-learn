@@ -1,5 +1,10 @@
 # learning-2-learn
+
 L2L Sensorimotor Association problems (Nat. Neuro. 2023)
+
+## Aaron's modifications:
+
+- Training parameters are now specified via argparse. Parameters are specified either via argparse in `run.py` or in the `getconfig` function in `train.py`. This way default parameters are specified exactly once for each option.
 
 ### Code dependencies
 * Python (model)
