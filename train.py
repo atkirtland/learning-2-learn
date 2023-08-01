@@ -7,6 +7,7 @@ import numpy as np
 import scipy.io as sio
 import tensorflow as tf
 import math
+from datetime import datetime
 
 from network import Model
 from enum import Enum
@@ -40,7 +41,10 @@ def getconfig(kwargs):
     rng = np.random.RandomState(config['seed'])
     config['rng']           = rng
 
-    save_name = '{:d}_{:d}_{:d}_{:f}_{:f}_{:f}_{:s}_matrices-test'.format(
+    config['save_dir'] = datetime.now().replace(microsecond=0).isoformat()
+    os.makedirs(os.path.join('data', config['save_dir']))
+
+    config['save_name'] = '{:d}_{:d}_{:d}_{:f}_{:f}_{:f}_{:s}'.format(
         config['seed'], 
         config['projGrad'], 
         config['originalAdam'], 
@@ -49,7 +53,6 @@ def getconfig(kwargs):
         config['beta2'], 
         config['runType']
     )
-    config['save_name']     = save_name
 
     config['image_shape'] = [10]
     config['num_input'] = np.prod(config['image_shape']) + 1 #Image + fixation stim
@@ -92,7 +95,7 @@ def testAndSaveParams(sess, config, model, images, taskIndex, suff=''):
         dat['wts_'+nm] = wt
 
     # Write to file
-    sio.savemat(os.path.join('data', 'saved_' + config['save_name'] + '_' + str(taskIndex) +suff+ '.mat'),dat)
+    sio.savemat(os.path.join('data', config['save_dir'], 'saved_' + config['save_name'] + '_' + str(taskIndex) +suff+ '.mat'),dat)
 
 
 # core function for manifold perturbations
@@ -287,7 +290,7 @@ def train(**kwargs):
 
         for trial in range(config['training_iters']):
             # test on all images
-            if (trial % 25 == 0) or (images is None):
+            if (trial % config['trialsPerTest'] == 0) or (images is None):
                 for k, testImages in enumerate(images_all):
                     c_lsq0 = test_input(config, sess, model, testImages, 0)
                     c_lsq1 = test_input(config, sess, model, testImages, 1)
@@ -424,12 +427,13 @@ def train(**kwargs):
                     hNorm.append(np.nan)
                     HM.append(np.nan)
                 else:
-                    convCnt.append(len(perf)-50) # Trials to convergence for new problem
+                    # 2023-08-01 change from len(perf)-50
+                    convCnt.append(len(perf)) # Trials to convergence for new problem
 
                     # Dump trained model and problem specifics to file after it is learned
                     if len(convCnt) >= 1 and config['SAVE_PARAMS'] == True:
                         testAndSaveParams(sess, config, model, images, len(convCnt))
-                        with open(os.path.join('data', 'perfs_' + config['save_name'] + '_' + str(len(convCnt)) + '.pkl'),'wb') as file:
+                        with open(os.path.join('data', config['save_dir'], 'perfs_' + config['save_name'] + '_' + str(len(convCnt)) + '.pkl'),'wb') as file:
                             pickle.dump(perfs_all, file)
 
                     # Save problem learning-specific stat summary
@@ -439,7 +443,7 @@ def train(**kwargs):
                     wNormO.append(np.mean(wNO[-50:]))
                     hNorm.append(np.mean(hN[-50:]))
                     HM.append(max(hm[-50:]))
-                    np.savetxt(os.path.join('data', 'trIms_' + config['save_name'] + '_' + str(len(convCnt)) + '.txt'), np.array(trIm), fmt='%f', delimiter=' ')
+                    np.savetxt(os.path.join('data', config['save_dir'], 'trIms_' + config['save_name'] + '_' + str(len(convCnt)) + '.txt'), np.array(trIm), fmt='%f', delimiter=' ')
 
                     # Set firing rate homeostatic set point after first problem is learned
                     if firstConv == False:
@@ -476,7 +480,7 @@ def train(**kwargs):
 
                 if config['runType'] != runType.Full:  # for manifold perturbation only
                     if len(convCnt) == 50:
-                        np.save(os.path.join('data', 'states_' + config['save_name']), saveStates)
+                        np.save(os.path.join('data', config['save_dir'], 'states_' + config['save_name']), saveStates)
 
                         model.restore(1)
                         oldWts, dEigs, sEigs = resetOutWeightsWithSameStruct(sess, model, config, 4, config['runType'], states=saveStates)
@@ -522,11 +526,11 @@ def train(**kwargs):
 
     print(convCnt)
     # Write training summaries to file
-    np.savetxt(os.path.join('data', 'conv_' + config['save_name']  + '.txt'), np.array(convCnt), fmt='%f', delimiter=' ')
-    np.savetxt(os.path.join('data', 'wNormR_' + config['save_name']  + '.txt'), np.array(wNormR), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', 'wNormR2_' + config['save_name']  + '.txt'), np.array(wNormR2), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', 'wNormI_' + config['save_name']  + '.txt'), np.array(wNormI), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', 'wNormO_' + config['save_name']  + '.txt'), np.array(wNormO), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', 'hNorm_' + config['save_name'] + '.txt'), np.array(hNorm), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', 'HM_' + config['save_name']  + '.txt'), np.array(HM), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', 'SINGS_' + config['save_name']  + '.txt'), singVals, fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'conv_' + config['save_name']  + '.txt'), np.array(convCnt), fmt='%f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'wNormR_' + config['save_name']  + '.txt'), np.array(wNormR), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'wNormR2_' + config['save_name']  + '.txt'), np.array(wNormR2), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'wNormI_' + config['save_name']  + '.txt'), np.array(wNormI), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'wNormO_' + config['save_name']  + '.txt'), np.array(wNormO), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'hNorm_' + config['save_name'] + '.txt'), np.array(hNorm), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'HM_' + config['save_name']  + '.txt'), np.array(HM), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'SINGS_' + config['save_name']  + '.txt'), singVals, fmt='%12.9f', delimiter=' ')

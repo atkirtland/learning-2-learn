@@ -45,6 +45,7 @@ if __name__ == '__main__':
     parser.add_argument('--trialsPerTask', type=int, default=None, help='Number of times to run each task')
     parser.add_argument('--debug_timing', action='store_true', help='Enable debug prints for timing')
     parser.add_argument('--debug_clmult', action='store_true', help='Enable debug prints for multiplication time in CL algo.')
+    parser.add_argument('--trialsPerTest',type=int, default=25, help='How often to test the network on the suite of tasks')
 
     parser.add_argument('--hypers', type=str, default=None, choices=HYPERPARAMS.keys(), help='Argument that sets multiple parameters')
 
