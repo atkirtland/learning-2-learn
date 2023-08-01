@@ -364,11 +364,11 @@ class Model(object):
         #if sess is None:
         #    sess = tf.compat.v1.get_default_session()
         #self.sess = sess
-        self.saver.restore(self.sess, os.path.join('data', self.config['save_dir'], self.config['save_name']+'_'+str(sCnt)+'.ckpt'))
+        self.saver.restore(self.sess, os.path.join('data', self.config['save_dir'], str(sCnt)+'.ckpt'))
 
     # Save model
     def save(self, sCnt):
-        save_path = self.saver.save(self.sess, os.path.join('data', self.config['save_dir'], self.config['save_name']+'_'+str(sCnt)+'.ckpt'))
+        save_path = self.saver.save(self.sess, os.path.join('data', self.config['save_dir'], str(sCnt)+'.ckpt'))
         print("Model saved in file: %s" % save_path)
 
     # Save ADAM's parameters

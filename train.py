@@ -7,7 +7,7 @@ import numpy as np
 import scipy.io as sio
 import tensorflow as tf
 import math
-from datetime import datetime
+import json
 
 from network import Model
 from enum import Enum
@@ -41,19 +41,6 @@ def getconfig(kwargs):
     rng = np.random.RandomState(config['seed'])
     config['rng']           = rng
 
-    config['save_dir'] = datetime.now().replace(microsecond=0).isoformat()
-    os.makedirs(os.path.join('data', config['save_dir']))
-
-    config['save_name'] = '{:d}_{:d}_{:d}_{:f}_{:f}_{:f}_{:s}'.format(
-        config['seed'], 
-        config['projGrad'], 
-        config['originalAdam'], 
-        config['init_lr_full'], 
-        config['beta1'], 
-        config['beta2'], 
-        config['runType']
-    )
-
     config['image_shape'] = [10]
     config['num_input'] = np.prod(config['image_shape']) + 1 #Image + fixation stim
     config['num_rnn'] = 100
@@ -76,9 +63,32 @@ def getconfig(kwargs):
     # Display configuration
     for key, val in config.items():
         print('{:20s} = '.format(key) + str(val))
+    
+    save_config(config)
 
     return config
 
+def save_config(config):
+    # Custom function to handle non-serializable data types
+    def custom_serializer(obj):
+        if isinstance(obj, np.float32):
+            return float(obj)
+        elif isinstance(obj, np.int64):
+            return int(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()  # Convert ndarray to a list
+        elif isinstance(obj, Enum):
+            return obj.value
+        elif isinstance(obj, np.random.mtrand.RandomState):
+            return None  # Exclude the RandomState object from serialization
+        raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
+
+    savepath = os.path.join('data', config['save_dir'])
+    if not os.path.exists(savepath):
+        os.makedirs(savepath)
+
+    with open(os.path.join('data', config['save_dir'], 'config.json'), 'w') as f:
+        json.dump(config, f, indent=4, default=custom_serializer)
 
 # save weights and biases
 def testAndSaveParams(sess, config, model, images, taskIndex, suff=''):
@@ -95,7 +105,7 @@ def testAndSaveParams(sess, config, model, images, taskIndex, suff=''):
         dat['wts_'+nm] = wt
 
     # Write to file
-    sio.savemat(os.path.join('data', config['save_dir'], 'saved_' + config['save_name'] + '_' + str(taskIndex) +suff+ '.mat'),dat)
+    sio.savemat(os.path.join('data', config['save_dir'], 'saved_'+str(taskIndex) +suff+ '.mat'),dat)
 
 
 # core function for manifold perturbations
@@ -433,7 +443,7 @@ def train(**kwargs):
                     # Dump trained model and problem specifics to file after it is learned
                     if len(convCnt) >= 1 and config['SAVE_PARAMS'] == True:
                         testAndSaveParams(sess, config, model, images, len(convCnt))
-                        with open(os.path.join('data', config['save_dir'], 'perfs_' + config['save_name'] + '_' + str(len(convCnt)) + '.pkl'),'wb') as file:
+                        with open(os.path.join('data', config['save_dir'], 'perfs_' + str(len(convCnt)) + '.pkl'),'wb') as file:
                             pickle.dump(perfs_all, file)
 
                     # Save problem learning-specific stat summary
@@ -443,7 +453,7 @@ def train(**kwargs):
                     wNormO.append(np.mean(wNO[-50:]))
                     hNorm.append(np.mean(hN[-50:]))
                     HM.append(max(hm[-50:]))
-                    np.savetxt(os.path.join('data', config['save_dir'], 'trIms_' + config['save_name'] + '_' + str(len(convCnt)) + '.txt'), np.array(trIm), fmt='%f', delimiter=' ')
+                    np.savetxt(os.path.join('data', config['save_dir'], 'trIms_' + str(len(convCnt)) + '.txt'), np.array(trIm), fmt='%f', delimiter=' ')
 
                     # Set firing rate homeostatic set point after first problem is learned
                     if firstConv == False:
@@ -480,7 +490,7 @@ def train(**kwargs):
 
                 if config['runType'] != runType.Full:  # for manifold perturbation only
                     if len(convCnt) == 50:
-                        np.save(os.path.join('data', config['save_dir'], 'states_' + config['save_name']), saveStates)
+                        np.save(os.path.join('data', config['save_dir'], 'states'), saveStates)
 
                         model.restore(1)
                         oldWts, dEigs, sEigs = resetOutWeightsWithSameStruct(sess, model, config, 4, config['runType'], states=saveStates)
@@ -526,11 +536,11 @@ def train(**kwargs):
 
     print(convCnt)
     # Write training summaries to file
-    np.savetxt(os.path.join('data', config['save_dir'], 'conv_' + config['save_name']  + '.txt'), np.array(convCnt), fmt='%f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'wNormR_' + config['save_name']  + '.txt'), np.array(wNormR), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'wNormR2_' + config['save_name']  + '.txt'), np.array(wNormR2), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'wNormI_' + config['save_name']  + '.txt'), np.array(wNormI), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'wNormO_' + config['save_name']  + '.txt'), np.array(wNormO), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'hNorm_' + config['save_name'] + '.txt'), np.array(hNorm), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'HM_' + config['save_name']  + '.txt'), np.array(HM), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'SINGS_' + config['save_name']  + '.txt'), singVals, fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'conv.txt'), np.array(convCnt), fmt='%f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'wNormR.txt'), np.array(wNormR), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'wNormR2.txt'), np.array(wNormR2), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'wNormI.txt'), np.array(wNormI), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'wNormO.txt'), np.array(wNormO), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'hNorm.txt'), np.array(hNorm), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'HM.txt'), np.array(HM), fmt='%12.9f', delimiter=' ')
+    np.savetxt(os.path.join('data', config['save_dir'], 'SINGS.txt'), singVals, fmt='%12.9f', delimiter=' ')

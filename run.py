@@ -1,5 +1,6 @@
 import argparse
 import sys
+from datetime import datetime
 
 sys.path.append(".")
 from train import train, runType
@@ -46,6 +47,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug_timing', action='store_true', help='Enable debug prints for timing')
     parser.add_argument('--debug_clmult', action='store_true', help='Enable debug prints for multiplication time in CL algo.')
     parser.add_argument('--trialsPerTest',type=int, default=25, help='How often to test the network on the suite of tasks')
+    parser.add_argument('--save_dir', type=str, default=datetime.now().replace(microsecond=0).isoformat(), help='Directory in ./data/ in which to store files')
 
     parser.add_argument('--hypers', type=str, default=None, choices=HYPERPARAMS.keys(), help='Argument that sets multiple parameters')
 
