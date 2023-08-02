@@ -4,7 +4,17 @@ L2L Sensorimotor Association problems (Nat. Neuro. 2023)
 
 ## Aaron's modifications:
 
-- Training parameters are now specified via argparse. Parameters are specified either via argparse in `run.py` or in the `getconfig` function in `train.py`. This way default parameters are specified exactly once for each option.
+Training parameters are now specified via argparse. Parameters are specified either via argparse in `run.py` or in the `getconfig` function in `train.py`. This way default parameters are specified exactly once for each option.
+
+You can run the code with a command such as:
+
+```
+savename="overtrain2000" &&
+now=$(date +"%Y-%m-%dT%H:%M:%S") &&
+savedir="$now"_$savename &&
+mkdir -p "data/$savedir" &&
+CUDA_VISIBLE_DEVICES=2 python run.py --hypers h1 --projGrad true --max_tasks 30 --overtraining --trialsPerTask 2000 --save_dir $savedir > data/$savedir/log.txt 2>&1
+```
 
 ### Code dependencies
 * Python (model)

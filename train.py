@@ -86,6 +86,10 @@ def save_config(config):
     savepath = os.path.join('data', config['save_dir'])
     if not os.path.exists(savepath):
         os.makedirs(savepath)
+        os.makedirs(os.path.join('data', config['save_dir'], 'ckpts'))
+        os.makedirs(os.path.join('data', config['save_dir'], 'perfs'))
+        os.makedirs(os.path.join('data', config['save_dir'], 'saved'))
+        os.makedirs(os.path.join('data', config['save_dir'], 'trIms'))
 
     with open(os.path.join('data', config['save_dir'], 'config.json'), 'w') as f:
         json.dump(config, f, indent=4, default=custom_serializer)
@@ -105,7 +109,7 @@ def testAndSaveParams(sess, config, model, images, taskIndex, suff=''):
         dat['wts_'+nm] = wt
 
     # Write to file
-    sio.savemat(os.path.join('data', config['save_dir'], 'saved_'+str(taskIndex) +suff+ '.mat'),dat)
+    sio.savemat(os.path.join('data', config['save_dir'], 'saved', str(taskIndex) +suff+ '.mat'),dat)
 
 
 # core function for manifold perturbations
@@ -451,7 +455,7 @@ def train(**kwargs):
                             with open(os.path.join('data', config['save_dir'], 'perfs.pkl'),'wb') as file:
                                 pickle.dump(test_perfs, file)
                         else:
-                            with open(os.path.join('data', config['save_dir'], 'perfs_' + str(len(convCnt)) + '.pkl'),'wb') as file:
+                            with open(os.path.join('data', config['save_dir'], 'perfs', str(len(convCnt)) + '.pkl'),'wb') as file:
                                 pickle.dump(test_perfs, file)
 
                     # Save problem learning-specific stat summary
@@ -461,7 +465,7 @@ def train(**kwargs):
                     wNormO.append(np.mean(wNO[-50:]))
                     hNorm.append(np.mean(hN[-50:]))
                     HM.append(max(hm[-50:]))
-                    np.savetxt(os.path.join('data', config['save_dir'], 'trIms_' + str(len(convCnt)) + '.txt'), np.array(trIm), fmt='%f', delimiter=' ')
+                    np.savetxt(os.path.join('data', config['save_dir'], 'trIms', str(len(convCnt)) + '.txt'), np.array(trIm), fmt='%f', delimiter=' ')
 
                     # Set firing rate homeostatic set point after first problem is learned
                     if firstConv == False:
