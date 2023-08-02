@@ -214,7 +214,7 @@ class Model(object):
         self.optimize(config)
 
         # Setup tf helper functionality
-        self.saver = tf.compat.v1.train.Saver(max_to_keep=None)
+        self.saver = tf.compat.v1.train.Saver(max_to_keep=config['max_to_keep'])
         self.config = config
         self.sess = None
 

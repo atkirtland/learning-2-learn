@@ -254,6 +254,7 @@ def train(**kwargs):
     t_start = time.time()
 
     images_all = generateImages(config)
+    np.save(os.path.join('data', config['save_dir'], 'images_all.npy'), images_all)
 
     if config['runType'] != runType.Full: # for manifold perturbation only
         saveStates = np.zeros((config['num_rnn'], config['tdim'], 100))
@@ -293,10 +294,11 @@ def train(**kwargs):
             output_proj = tf.zeros((config['num_rnn_out'], config['num_rnn_out']))
             recurrent_proj = tf.zeros((config['num_rnn'], config['num_rnn']))
         
-        perfs_all = {}
+        test_perfs = {}
         for k in range(config['max_tasks']):
-            perfs_all[k] = []
-        perfs_all['trials'] = []
+            test_perfs[k] = []
+        test_perfs['trials'] = []
+        test_perfs['training_task'] = []
 
         for trial in range(config['training_iters']):
             # test on all images
@@ -304,8 +306,9 @@ def train(**kwargs):
                 for k, testImages in enumerate(images_all):
                     c_lsq0 = test_input(config, sess, model, testImages, 0)
                     c_lsq1 = test_input(config, sess, model, testImages, 1)
-                    perfs_all[k].append((c_lsq0[0], c_lsq1[0]))
-                perfs_all['trials'].append(trial)
+                    test_perfs[k].append((c_lsq0[0], c_lsq1[0]))
+                test_perfs['trials'].append(trial)
+                test_perfs['training_task'].append(len(convCnt))
 
             # set optimizer for each new task
             if config['projGrad'] and (images is None):
@@ -437,14 +440,19 @@ def train(**kwargs):
                     hNorm.append(np.nan)
                     HM.append(np.nan)
                 else:
-                    # 2023-08-01 change from len(perf)-50
-                    convCnt.append(len(perf)) # Trials to convergence for new problem
+                    convCnt.append(len(perf)-50) # Trials to convergence for new problem
 
                     # Dump trained model and problem specifics to file after it is learned
                     if len(convCnt) >= 1 and config['SAVE_PARAMS'] == True:
+                        # mat file
                         testAndSaveParams(sess, config, model, images, len(convCnt))
-                        with open(os.path.join('data', config['save_dir'], 'perfs_' + str(len(convCnt)) + '.pkl'),'wb') as file:
-                            pickle.dump(perfs_all, file)
+                        # test_perfs.pkl
+                        if config['replace_test_perfs']:
+                            with open(os.path.join('data', config['save_dir'], 'perfs.pkl'),'wb') as file:
+                                pickle.dump(test_perfs, file)
+                        else:
+                            with open(os.path.join('data', config['save_dir'], 'perfs_' + str(len(convCnt)) + '.pkl'),'wb') as file:
+                                pickle.dump(test_perfs, file)
 
                     # Save problem learning-specific stat summary
                     wNormR.append(np.mean(wNR[-50:]))
@@ -470,6 +478,24 @@ def train(**kwargs):
                         if len(convCnt) <= 30:
                             model.save(len(convCnt))
 
+                    # 2023-08-01
+                    # Write training summaries to file
+                    with open(os.path.join('data', config['save_dir'], 'conv.txt'), 'a') as f:
+                        f.write(f'{convCnt[-1]:f}\n')
+                    with open(os.path.join('data', config['save_dir'], 'wNormR.txt'), 'a') as f:
+                        f.write(f'{wNormR[-1]:12.9f}\n')
+                    with open(os.path.join('data', config['save_dir'], 'wNormR2.txt'), 'a') as f:
+                        f.write(f'{wNormR2[-1]:12.9f}\n')
+                    with open(os.path.join('data', config['save_dir'], 'wNormI.txt'), 'a') as f:
+                        f.write(f'{wNormI[-1]:12.9f}\n')
+                    with open(os.path.join('data', config['save_dir'], 'wNormO.txt'), 'a') as f:
+                        f.write(f'{wNormO[-1]:12.9f}\n')
+                    with open(os.path.join('data', config['save_dir'], 'hNorm.txt'), 'a') as f:
+                        f.write(f'{hNorm[-1]:12.9f}\n')
+                    with open(os.path.join('data', config['save_dir'], 'HM.txt'), 'a') as f:
+                        f.write(f'{HM[-1]:12.9f}\n')
+                    with open(os.path.join('data', config['save_dir'], 'SINGS.txt'), 'a') as f:
+                        f.write('  '.join([f'{val:12.9f}' for val in singVals[-1]]) + '\n')
                 
                 if config['debug_timing']:
                     print("block1", time.time()-t_start)
@@ -535,12 +561,3 @@ def train(**kwargs):
                 break
 
     print(convCnt)
-    # Write training summaries to file
-    np.savetxt(os.path.join('data', config['save_dir'], 'conv.txt'), np.array(convCnt), fmt='%f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'wNormR.txt'), np.array(wNormR), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'wNormR2.txt'), np.array(wNormR2), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'wNormI.txt'), np.array(wNormI), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'wNormO.txt'), np.array(wNormO), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'hNorm.txt'), np.array(hNorm), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'HM.txt'), np.array(HM), fmt='%12.9f', delimiter=' ')
-    np.savetxt(os.path.join('data', config['save_dir'], 'SINGS.txt'), singVals, fmt='%12.9f', delimiter=' ')

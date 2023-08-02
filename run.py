@@ -48,6 +48,8 @@ if __name__ == '__main__':
     parser.add_argument('--debug_clmult', action='store_true', help='Enable debug prints for multiplication time in CL algo.')
     parser.add_argument('--trialsPerTest',type=int, default=25, help='How often to test the network on the suite of tasks')
     parser.add_argument('--save_dir', type=str, default=datetime.now().replace(microsecond=0).isoformat(), help='Directory in ./data/ in which to store files')
+    parser.add_argument('--max_to_keep', type=int, default=None, help='max_to_keep parameter for network Saver')
+    parser.add_argument('--replace_test_perfs', action='store_true', help='If flag is set, will save all test perfs to the same file and simply replace it on each new task rather than saving to a new file each time')
 
     parser.add_argument('--hypers', type=str, default=None, choices=HYPERPARAMS.keys(), help='Argument that sets multiple parameters')
 
