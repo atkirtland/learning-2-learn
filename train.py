@@ -84,12 +84,11 @@ def save_config(config):
         raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
     savepath = os.path.join('data', config['save_dir'])
-    if not os.path.exists(savepath):
-        os.makedirs(savepath)
-        os.makedirs(os.path.join('data', config['save_dir'], 'ckpts'))
-        os.makedirs(os.path.join('data', config['save_dir'], 'perfs'))
-        os.makedirs(os.path.join('data', config['save_dir'], 'saved'))
-        os.makedirs(os.path.join('data', config['save_dir'], 'trIms'))
+    if not os.path.exists(os.path.join(savepath, 'ckpts')):
+        os.makedirs(os.path.join(savepath, 'ckpts'))
+        os.makedirs(os.path.join(savepath, 'perfs'))
+        os.makedirs(os.path.join(savepath, 'saved'))
+        os.makedirs(os.path.join(savepath, 'trIms'))
 
     with open(os.path.join('data', config['save_dir'], 'config.json'), 'w') as f:
         json.dump(config, f, indent=4, default=custom_serializer)
@@ -499,7 +498,7 @@ def train(**kwargs):
                     with open(os.path.join('data', config['save_dir'], 'HM.txt'), 'a') as f:
                         f.write(f'{HM[-1]:12.9f}\n')
                     with open(os.path.join('data', config['save_dir'], 'SINGS.txt'), 'a') as f:
-                        f.write('  '.join([f'{val:12.9f}' for val in singVals[-1]]) + '\n')
+                        f.write('  '.join([f'{val:12.9f}' for val in singVals[len(convCnt)-1]]) + '\n')
                 
                 if config['debug_timing']:
                     print("block1", time.time()-t_start)
