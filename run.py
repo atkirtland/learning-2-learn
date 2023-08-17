@@ -60,5 +60,13 @@ if __name__ == '__main__':
         for param, value in params.items():
             setattr(args, param, value)
 
+    if args.runType == runType.Full:
+        args.max_tasks = 31 # originally 1001
+    elif args.runType in [runType.DSManifPert, runType.SSManifPert, runType.ControlManifPert]:
+        args.max_tasks = 31 # originally 101
+    else:
+        raise Exception("args.runType is not correct")
+
+
     args_dict = vars(args)
     train(**args_dict)

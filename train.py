@@ -53,10 +53,8 @@ def getconfig(kwargs):
     config['fixationPeriod']  = np.array([0, int(1500/config['dt'])])
     config['decisionPeriod'] = np.array([int(1500/config['dt']), int(2000/config['dt'])])
 
-    if config['max_tasks'] is None:
-        config['max_tasks'] = 1001
-        if config['runType'] != runType.Full:
-            config['max_tasks'] = 101
+    config['manifold_perturbation_total'] = config['max_tasks']-1
+    config['manifold_perturbation_threshold'] = int((config['max_tasks']-1)/2)
     
     config['alpha_projection'] = 1e-3
     
@@ -116,8 +114,8 @@ def resetOutWeightsWithSameStruct(sess, model, config, k, rType, eigs = None, ei
     outWts = model.getOutWeights(sess)
 
     if eigs is None:
-        states1 = states[:,:,0:50]
-        states2 = states[:,:,50:100]
+        states1 = states[:,:,0:config['manifold_perturbation_threshold']]
+        states2 = states[:,:,config['manifold_perturbation_threshold']:config['manifold_perturbation_total']]
 
         # Find decision and stimulus subspaces
         states1Mn = np.mean(states1, axis = 2, keepdims = False)
@@ -237,7 +235,6 @@ def generateData(config, images = None, test = False, stim = None):
 
 def test_input(config, sess, model, images, idx):
     # 1st output is stims
-    # 3rd output is images
     _, trials = generateData(config, images=images, test=True, stim=[idx])
 
     feed_dict = {model.x: trials['x'],
@@ -260,7 +257,7 @@ def train(**kwargs):
     np.save(os.path.join('data', config['save_dir'], 'images_all.npy'), images_all)
 
     if config['runType'] != runType.Full: # for manifold perturbation only
-        saveStates = np.zeros((config['num_rnn'], config['tdim'], 100))
+        saveStates = np.zeros((config['num_rnn'], config['tdim'], config['manifold_perturbation_total']))
 
     # Reset tensorflow graphs
     tf.compat.v1.reset_default_graph() 
@@ -505,12 +502,12 @@ def train(**kwargs):
 
                 if config['runType'] != runType.Full:  # for manifold perturbation only
                     st0 = getStates(sess, config, model, images)
-                    if len(convCnt) <= 50:
+                    if len(convCnt) <= config['manifold_perturbation_threshold']:
                         X = st0[0]
                         print('Size: ' + str(X.shape))
                         saveStates[:,:,len(convCnt)-1] = X.T
                         X = st0[1]
-                        saveStates[:,:,len(convCnt)-1+50] = X.T
+                        saveStates[:,:,len(convCnt)-1+config['manifold_perturbation_threshold']] = X.T
                         
                 # Summarize and print learning stats for learned problem
                 print('Converged in: ' + str(convCnt[-1]) + ' ' + str(len(convCnt)) + ' (' + str(
@@ -518,7 +515,7 @@ def train(**kwargs):
                 print('Sing Dev: ' + str(np.sum(np.abs(singVals[0,:]-currSingVals[0]))))
 
                 if config['runType'] != runType.Full:  # for manifold perturbation only
-                    if len(convCnt) == 50:
+                    if len(convCnt) == config['manifold_perturbation_threshold']:
                         np.save(os.path.join('data', config['save_dir'], 'states'), saveStates)
 
                         model.restore(1)
@@ -526,7 +523,7 @@ def train(**kwargs):
                         model.removeTrainable(['out_RNN_weights', 'out_RNN_biases'], config)
                         model.printTrainable()
 
-                    if len(convCnt) >= 50:
+                    if len(convCnt) >= config['manifold_perturbation_threshold']:
                         print(str(convCnt[-1]))
                         model.restore(1)
                         resetOutWeightsWithSameStruct(sess, model, config, 4, config['runType'], eigs=dEigs, eigsS=sEigs)
