@@ -1,8 +1,8 @@
 clear
 close all
 
-suff = '0.000100_0.001000_0.000100_0.000500_0.100000_10.000000_runType.Full';
-dir = '../data';
+dir = '../data/2023-08-01T17:43:58_plain';
+dir = '../data/2023-08-01T17:44:08_proj';
 
 dt = 1.0;
 tau = 100.0;
@@ -13,13 +13,18 @@ T = 2;
 for net = 1:1
     for ep = 1:1
         figure;
-        tasks = ((ep-1)*50+2):(ep*50 +1);
+        % tasks = ((ep-1)*50+2):(ep*50 +1);
+        tasks = 1:30;
         tCnt = 0;
         rHist = zeros(int32(2000/dt), 100, N); % To save learned trajectories
         for task = tasks
             tCnt = tCnt+1;
                         
-            load(sprintf('%s/saved_%d_%s_%d.mat', dir, net-1, suff, task));
+            file_path = sprintf('%s/saved/%d.mat', dir, task);
+            load(file_path);
+            wts_RNNin_weights = wts_leakyRNN_kernel(1:11, :);
+            wts_leakyRNN_weights = wts_leakyRNN_kernel(12:end, :);
+
             IS = double(wts_leakyRNN_init_state);
             IW = double(wts_RNNin_weights);
             RW = double(wts_leakyRNN_weights);
@@ -67,12 +72,13 @@ for net = 1:1
         rHistS = reshape(rHistS, [N, 100, int32(2000/dt)]);        
         
         % loop to calculate net post-synaptic currents at output units per problem
-        tasks = ((ep-1)*50+2):(ep*50 +1);
+        % tasks = ((ep-1)*50+2):(ep*50 +1);
+        tasks = 1:30;
         tCnt = 0;
         outProj = zeros(3, 3, 100, int32(2000/dt));
         for task = tasks
             tCnt = tCnt+1;
-            load(sprintf('%s/saved_%d_%s_%d.mat', dir, net-1, suff, task));            
+            load(sprintf('%s/saved/%d.mat', dir, task));
             
             OW = double(wts_out_RNN_weights);
             
