@@ -1,16 +1,23 @@
 clear
 close all
 
-useSaved = true;
+useSaved = false;
 
-suff = '0.000100_0.001000_0.000100_0.000500_0.100000_10.000000_runType.Full';
-dir = '../data';
+numSeeds = 1;
+numTasks = 30;
+% was 4
+sNet = 1;
+
+param30 = 1;
+param50 = 1;
+
+dir = '../data/2023-08-01T17:43:58_plain';
 
 % Load trials to criterion data for trained nets
-C1 = zeros(1001,10);
-for i = 1:10
-  c = load(sprintf('%s/conv_%d_%s.txt',dir,i-1,suff));
-  C1(:,i) = c(1:1001);
+C1 = zeros(numTasks,numSeeds);
+for i = 1:numSeeds
+  c = load(sprintf('%s/conv.txt',dir));
+  C1(:,i) = c(1:numTasks);
 end
 
 if useSaved == false
@@ -20,16 +27,16 @@ if useSaved == false
     scales= [];
     asymps= [];
     clf
-    for i = 1:10
-        Y1 = C1(2:1001,i);
+    for i = 1:numSeeds
+        Y1 = C1(2:numTasks,i);
         if sum(isnan(Y1))
             print 'problem'
             continue;
         end
         % Initial parameter value
-        asymptote = mean(Y1((end-30):end));
+        asymptote = mean(Y1((end-param30):end));
         scale = (Y1-asymptote);
-        scale = mean(scale(1:30));
+        scale = mean(scale(1:param30));
         if scale < 0
             scale = 100;
         end
@@ -38,7 +45,7 @@ if useSaved == false
             'Upper',[2*scale,-1/200,2*asymptote],'StartPoint',[scale -1/50 asymptote],'MaxFunEvals',5000,'MaxIter',2000,'TolFun',10^-20,'TolX',10^-20);
         ft1 = fittype('a*exp(b*x)+c','options',fo);
         
-        X = [0:999]';
+        X = [0:numTasks-2]';
         
         [fC,~,op] = fit(X,Y1,ft1);
         
@@ -46,7 +53,7 @@ if useSaved == false
         subplot(5,6,i)
         plot(fC,X,Y1)
         hold on
-        plot(movmean(Y1,30),'k','linewidth',3)
+        plot(movmean(Y1,param30),'k','linewidth',3)
         ylim([0 500])
         title(sprintf('%d, Time const = %f',i, -1/fC.b))
         timeCnsts = [timeCnsts -1/fC.b];
@@ -74,25 +81,24 @@ end
 load('../results/f1_perfFit');
 figure; 
 subplot(1,3,1)
-sNet = 4;
-Y1 = C1(1:1001,sNet);
+Y1 = C1(1:numTasks,sNet);
 X = 1:length(Y1);
-pRange = 2:50:1001; 
-D = zeros(50,length(pRange));
+pRange = 2:param50:numTasks; 
+D = zeros(param50,length(pRange));
 for i = 1:length(pRange)
-    D(:,i) = Y1(pRange(i):(pRange(i)+49));
+    D(:,i) = Y1(pRange(i):(pRange(i)+param50-1));
 end
 hold on
-h = boxplot(D, 'positions', [25:50:1000]);
+h = boxplot(D, 'positions', [param50/2:param50:numTasks-1]);
 set(h,{'linew'},{2});
 plot(0,Y1(1),'o','linewidth',5)
-plot(movmean(Y1(2:end),30),'k','linewidth',3)
-X = [0:999];
+plot(movmean(Y1(2:end),param30),'k','linewidth',3)
+X = [0:numTasks-2];
 plot(X+1,SC(sNet)*exp((-1/TC(sNet)).*X)+AS(sNet),'color',[0,0.7,0],'linewidth',3)
-xlim([-1,1000])
+xlim([-1,numTasks-1])
 % ylim([-5, Y1(1)+100])
-set(gca,'xtick',[100:200:1000])
-set(gca,'xticklabel',[100:200:1000])
+set(gca,'xtick',[100:200:numTasks-1])
+set(gca,'xticklabel',[100:200:numTasks-1])
 xlabel('Problems')
 ylabel('# trials to criterion')
 title('Sample network performance fit')

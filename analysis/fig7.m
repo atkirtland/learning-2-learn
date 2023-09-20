@@ -1,7 +1,7 @@
 clear
 close all
 
-useSaved = true;
+useSaved = false;
 
 suff = '0.000100_0.001000_0.000100_0.000500_0.100000_10.000000_runType.Full';
 dir = '../data';

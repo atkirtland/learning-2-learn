@@ -1,10 +1,13 @@
 clear
 close all
 
-useSaved = true;
+useSaved = false;
 
-suff = '0.000100_0.001000_0.000100_0.000500_0.100000_10.000000_runType.Full';
-dir = '../data';
+dir = '../data/2023-08-01T17:43:58_plain';
+% dir = '../data/2023-08-01T17:44:08_proj';
+
+numNet = 1;
+numTasks = 1001; 
 
 dt = 1.0;
 tau = 100.0;
@@ -15,20 +18,22 @@ T = 2;
 if useSaved == false
     
     corrs = []; % to save correlation coefficients / R^2 between weight change magnitudes and learning performance
-    for net = 1:10
+    for net = 1:numNet
         
-        VFC = zeros(1000,9); % to save vector field change magnitude measurements
+        VFC = zeros(numTasks-1,9); % to save vector field change magnitude measurements
         % to save vector field change dimensionality measurements
-        dims_SingProb = zeros(1000,2,2);
+        dims_SingProb = zeros(numTasks-1,2,2);
         dims_SingEp = zeros(20,2,2);
-        dimsT_SingProb = zeros(1000,1);
+        dimsT_SingProb = zeros(numTasks-1,1);
         dimsT_SingEp = zeros(20,1);
         
         tc=0;
         % loop through problems in groups of 50 at a time
         for ep = 1:20
             
-            tasks = ((ep-1)*50+2):(ep*50 +1);
+            % tasks = ((ep-1)*50+2):(ep*50 +1);
+            tasks = 2:30;
+
             comps = zeros(2, 2, N, 50, 2, int32(2000/dt));
             compsT = zeros(N, 50, 2, int32(2000/dt));
             t_ec = 0;
@@ -39,13 +44,21 @@ if useSaved == false
                 t_ec = t_ec+1;
                 [task tc t_ec]
                 
-                load(sprintf('%s/saved_%d_%s_%d.mat', dir, net-1, suff, task-1));
+                file_path = sprintf('%s/saved/%d.mat', dir, task-1);
+                load(file_path);
+                wts_RNNin_weights = wts_leakyRNN_kernel(1:11, :);
+                wts_leakyRNN_weights = wts_leakyRNN_kernel(12:end, :);
+
                 IS0 = double(wts_leakyRNN_init_state);
                 IW0 = double(wts_RNNin_weights);
                 RW0 = double(wts_leakyRNN_weights);
                 RB0 = double(wts_leakyRNN_biases);
                 
-                load(sprintf('%s/saved_%d_%s_%d.mat', dir, net-1, suff, task));
+                file_path = sprintf('%s/saved/%d.mat', dir, task);
+                load(file_path);
+                wts_RNNin_weights = wts_leakyRNN_kernel(1:11, :);
+                wts_leakyRNN_weights = wts_leakyRNN_kernel(12:end, :);
+
                 IS = double(wts_leakyRNN_init_state);
                 IW = double(wts_RNNin_weights);
                 RW = double(wts_leakyRNN_weights);
