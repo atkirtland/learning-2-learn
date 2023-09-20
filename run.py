@@ -41,7 +41,7 @@ if __name__ == '__main__':
     parser.add_argument('--init_lr_full', type=float, default=0.001, help='Initial learning rate')
     parser.add_argument('--beta1', type=float, default=0.9, help='Beta1 parameter for Adam optimizer')
     parser.add_argument('--beta2', type=float, default=0.999, help='Beta2 parameter for Adam optimizer')
-    parser.add_argument('--max_tasks', type=int, default=30, help='Maximum number of tasks')
+    parser.add_argument('--max_tasks', type=int, help='Maximum number of tasks')
     parser.add_argument('--overtraining', action='store_true', help='Enable overtraining')
     parser.add_argument('--trialsPerTask', type=int, default=None, help='Number of times to run each task')
     parser.add_argument('--debug_timing', action='store_true', help='Enable debug prints for timing')
@@ -60,12 +60,13 @@ if __name__ == '__main__':
         for param, value in params.items():
             setattr(args, param, value)
 
-    if args.runType == runType.Full:
-        args.max_tasks = 31 # originally 1001
-    elif args.runType in [runType.DSManifPert, runType.SSManifPert, runType.ControlManifPert]:
-        args.max_tasks = 31 # originally 101
-    else:
-        raise Exception("args.runType is not correct")
+    if args.max_tasks is None:
+        if args.runType == runType.Full:
+            args.max_tasks = 31 # originally 1001
+        elif args.runType in [runType.DSManifPert, runType.SSManifPert, runType.ControlManifPert]:
+            args.max_tasks = 31 # originally 101
+        else:
+            raise Exception("args.runType is not correct")
 
 
     args_dict = vars(args)
