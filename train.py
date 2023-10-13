@@ -48,10 +48,11 @@ def getconfig(kwargs):
     config['fixationInput'] = 1.0/np.sqrt(np.prod(config['image_shape']))
 
     # Trial duration parameters
-    config['tdim'] = int(2000/config['dt'])
-    config['stimPeriod']   = np.array([0, int(500/config['dt'])])
-    config['fixationPeriod']  = np.array([0, int(1500/config['dt'])])
-    config['decisionPeriod'] = np.array([int(1500/config['dt']), int(2000/config['dt'])])
+    config['totalLength'] = config['stimLength']+config['delayLength']+config['decisionLength']
+    config['tdim'] = int(config['totalLength']/config['dt'])
+    config['stimPeriod']   = np.array([0, int(config['stimLength']/config['dt'])])
+    config['fixationPeriod']  = np.array([0, int((config['stimLength']+config['delayLength'])/config['dt'])])
+    config['decisionPeriod'] = np.array([int((config['stimLength']+config['delayLength'])/config['dt']), int((config['stimLength']+config['delayLength']+config['decisionLength'])/config['dt'])])
 
     config['manifold_perturbation_total'] = config['max_tasks']-1
     config['manifold_perturbation_threshold'] = int((config['max_tasks']-1)/2)
@@ -378,7 +379,7 @@ def train(**kwargs):
 
                     eval_h, eval_x, eval_y, Win, Wrec = sess.run([model.states, model.x, model.y_rnn, model.w_in, model.w_rec], feed_dict=feed_dict)
                     eval_h = np.expand_dims(eval_h, axis=1)
-                    eval_x = np.tile(eval_x, (2000,1,1))
+                    eval_x = np.tile(eval_x, (config['totalLength'],1,1))
                     eval_y = np.expand_dims(eval_y, axis=1)
 
                     full_state = np.concatenate([eval_x, eval_h], -1)

@@ -137,18 +137,34 @@ class customRNNCell(object):
         self.config = config
 
     def call(self, stims, states0, OUnoise):
-        states = states0
+        with tf.GradientTape() as tape:
+            tape.watch(states0)
 
-        # Single-timestep update of state
-        with tf.compat.v1.variable_scope("compute", reuse=self._reuse):
-            new_noise = (1.0-self._alpha_noise)*OUnoise + tf.random.normal(tf.shape(states), mean=0, stddev=np.sqrt(2.0*self._alpha_noise)*self._sigma, dtype=tf.float32)
-            new_states = (1.0 - self._alpha) * states + \
-                         self._alpha * self._activation(tf.matmul(array_ops.concat([stims, states], 1), self._kernel) + self._bias + new_noise)
+            states = states0
 
-            ret_states = new_states
-            ret_noise = new_noise
-        self._reuse = True
-        return ret_noise, ret_states
+            # Single-timestep update of state
+            with tf.compat.v1.variable_scope("compute", reuse=self._reuse):
+                new_noise = (1.0-self._alpha_noise)*OUnoise + tf.random.normal(tf.shape(states), mean=0, stddev=np.sqrt(2.0*self._alpha_noise)*self._sigma, dtype=tf.float32)
+                new_states = (1.0 - self._alpha) * states + \
+                            self._alpha * self._activation(tf.matmul(array_ops.concat([stims, states], 1), self._kernel) + self._bias + new_noise)
+
+                if self.config["lcpSampling"]:
+                    # sample = tf.random.normal(shape=states0.shape)
+                    # directional_output = tf.reduce_sum(sample * new_states)
+                    # directional_gradient = tape.gradient(directional_output, states0)
+                    # gradient = directional_gradient
+                    jacobian_matrix = tape.jacobian(new_states, states0)
+                    sample = tf.random.normal(shape=new_states.shape)
+                    dh = tf.tensordot(jacobian_matrix, sample, axes=[[0, 1], [0, 1]])
+                    gradient = dh
+                else:
+                    exact_gradient = tape.gradient(new_states, states0)
+                    gradient = exact_gradient
+
+                ret_states = new_states
+                ret_noise = new_noise
+            self._reuse = True
+        return ret_noise, ret_states, gradient
 
 
     def unroll(self, imageStims, config):
@@ -163,6 +179,9 @@ class customRNNCell(object):
         output_rnn_ta = tf.TensorArray(dtype=tf.float32,
                                        size=config['tdim'],
                                        tensor_array_name="rnn_ta")
+        gradients = tf.TensorArray(dtype=tf.float32,
+                                   size=config['tdim'],
+                                   tensor_array_name="gradients")
 
         # Loop through time for forward pass
         for time in range(config['tdim']):
@@ -175,19 +194,21 @@ class customRNNCell(object):
                 stims = self.zeroStims
 
             # Single timestep forward pass
-            new_noise, new_states = self.call(stims, states, noise)
+            new_noise, new_states, gradient = self.call(stims, states, noise)
 
             # Dump aux variables
             in_rnn_ta = in_rnn_ta.write(time, stims)
             output_rnn_ta = output_rnn_ta.write(time, new_states)
+            gradients = gradients.write(time, gradient)
 
             states = new_states
             noise = new_noise
 
         final_rnn_inputs = in_rnn_ta.stack()
         final_rnn_outputs = output_rnn_ta.stack()
+        final_gradients = gradients.stack()
 
-        return (final_rnn_outputs, final_rnn_inputs, new_states)
+        return (final_rnn_outputs, final_rnn_inputs, new_states, final_gradients)
 
 
 ########################################################################
@@ -243,12 +264,19 @@ class Model(object):
                                         initializer=init_ops.constant_initializer(0.0))
 
         # Unroll RNN
-        self.final_rnn_outputs, self.final_rnn_inputs, self.final_state = cell.unroll(self.x, config)
+        self.final_rnn_outputs, self.final_rnn_inputs, self.final_state, self.final_gradients = cell.unroll(self.x, config)
 
         # Generate decision output nodes from RNN state
         self.states = tf.reshape(self.final_rnn_outputs, (-1, config['num_rnn']))
         self.y_hat_ = tf.matmul(self.states, self.w_rnn_out) + self.b_rnn_out
         self.y_hat = tf.nn.softmax(self.y_hat_)
+    
+    def lcp_loss(self, states, gradients, lmbda):
+        frob_norm = tf.norm(gradients, axis=[-2, -1])
+        diff = frob_norm - lmbda
+        rectified = tf.clip_by_value(diff, 0., tf.float32.max)
+        loss = tf.reduce_mean(rectified)
+        return loss
 
     # Setup optimization
     # this function `optimize` is similar to `_build` in LDLabs' code
@@ -311,6 +339,11 @@ class Model(object):
         if config['l2_wR'] > 0:
             self.wNormR = tf.reduce_mean(tf.square(self.sings[:int(config['svBnd'])]))
             self.cost_reg_rnn += config['l2_wR'] * (self.wNormR)#-self.lWRTargVar)
+
+        # LCP Loss
+        if config['uselcp']:
+            self.lcploss = self.lcp_loss(self.states, self.final_gradients, config['lcplmbda'])
+            self.cost_reg_rnn += self.lcploss
 
         # Setup Optimizer - ADAM
         if config['projGrad']:

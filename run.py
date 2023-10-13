@@ -50,6 +50,12 @@ if __name__ == '__main__':
     parser.add_argument('--save_dir', type=str, default=datetime.now().replace(microsecond=0).isoformat(), help='Directory in ./data/ in which to store files')
     parser.add_argument('--max_to_keep', type=int, default=None, help='max_to_keep parameter for network Saver')
     parser.add_argument('--replace_test_perfs', action='store_true', help='If flag is set, will save all test perfs to the same file and simply replace it on each new task rather than saving to a new file each time')
+    parser.add_argument('--stimLength', type=int, default=500, help='Length of time to show stimulus')
+    parser.add_argument('--delayLength', type=int, default=1000, help='Length of delay period')
+    parser.add_argument('--decisionLength', type=int, default=500, help='Length of time of decision period')
+    parser.add_argument('--uselcp', action='store_true', help="Use the Lipschitz Constant Penalty loss")
+    parser.add_argument('--lcplmbda', type=float, default=1.0, help="Lambda value for LCP")
+    parser.add_argument('--lcpSampling', action='store_true', help="Use sampling instead of exact gradient for LCP")
 
     parser.add_argument('--hypers', type=str, default=None, choices=HYPERPARAMS.keys(), help='Argument that sets multiple parameters')
 
