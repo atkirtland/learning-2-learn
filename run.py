@@ -4,6 +4,7 @@ from datetime import datetime
 
 sys.path.append(".")
 from train import train, runType
+from notrain import notrain
 
 def run_type(value):
     if value not in runType.__members__:
@@ -56,6 +57,7 @@ if __name__ == '__main__':
     parser.add_argument('--uselcp', action='store_true', help="Use the Lipschitz Constant Penalty loss")
     parser.add_argument('--lcplmbda', type=float, default=1.0, help="Lambda value for LCP")
     parser.add_argument('--lcpSampling', action='store_true', help="Use sampling instead of exact gradient for LCP")
+    parser.add_argument('--notrain', action='store_true', help="Don't train the network. Used for testing untrained network performance on tasks.")
 
     parser.add_argument('--hypers', type=str, default=None, choices=HYPERPARAMS.keys(), help='Argument that sets multiple parameters')
 
@@ -76,4 +78,7 @@ if __name__ == '__main__':
 
 
     args_dict = vars(args)
-    train(**args_dict)
+    if args.notrain:
+        notrain(**args_dict)
+    else:
+        train(**args_dict)

@@ -110,61 +110,6 @@ def testAndSaveParams(sess, config, model, images, taskIndex, suff=''):
     sio.savemat(os.path.join('data', config['save_dir'], 'saved', str(taskIndex) +suff+ '.mat'),dat)
 
 
-# core function for manifold perturbations
-def resetOutWeightsWithSameStruct(sess, model, config, k, rType, eigs = None, eigsS = None, states = None):
-    outWts = model.getOutWeights(sess)
-
-    if eigs is None:
-        states1 = states[:,:,0:config['manifold_perturbation_threshold']]
-        states2 = states[:,:,config['manifold_perturbation_threshold']:config['manifold_perturbation_total']]
-
-        # Find decision and stimulus subspaces
-        states1Mn = np.mean(states1, axis = 2, keepdims = False)
-        states2Mn = np.mean(states2, axis = 2, keepdims = False)
-
-        # print(str(states1Mn.shape) + ' ' + str(states2Mn.shape))
-        x = np.concatenate((states1Mn, states2Mn), axis=1)
-        # print(str(x.shape))
-        U,S,Vh = np.linalg.svd(x, full_matrices=False)
-        eigs = np.real(U[:,0:k])
-
-        states1D = np.matmul(np.matmul(eigs, eigs.T), np.reshape(states1,(config['num_rnn'],-1)))
-        states2D = np.matmul(np.matmul(eigs, eigs.T), np.reshape(states2,(config['num_rnn'],-1)))
-        states1S = np.reshape(states1,(config['num_rnn'],-1))-states1D
-        states2S = np.reshape(states2,(config['num_rnn'],-1))-states2D
-        xS = np.concatenate((states1S, states2S), axis=1)
-        US,SS,VhS = np.linalg.svd(xS, full_matrices=False)
-        eigsS = np.real(US)
-        
-    # Swap out first few PCs of source subspace from output weights
-    # with first few PCs of target subspace
-    newOutWts = np.copy(outWts)
-    newOrder = config['rng'].permutation(np.arange(k))
-    for i in range(0,k):
-        if rType == runType.SSManifPert:
-            # S -> S mainfold perturbation
-            oldVec = eigsS[:,i]
-            newVec = eigsS[:,newOrder[i]]
-            ov = np.dot(outWts.T, oldVec)
-            newOutWts = newOutWts - np.outer(oldVec, ov) + np.outer(newVec, ov)
-
-        elif rType == runType.DSManifPert:
-            # D -> S mainfold perturbation
-            oldVec = eigs[:,i]
-            newVec = eigsS[:,newOrder[i]]
-            ov = np.dot(outWts.T, oldVec)
-            newOutWts = newOutWts - np.outer(oldVec, ov) + np.outer(newVec, ov)
-
-        elif rType == runType.ControlManifPert:
-            # Control with frozen weights only
-            continue
-        
-        else:
-            raise NotImplementedError()
-
-    model.setOutWeights(sess, newOutWts) # update new output weights
-    return outWts, eigs, eigsS
-
 # Simulate and save learned trajectories -
 # to infer decision and stimulus subspaces,
 # and subsequently perform manifold perturbations
@@ -248,7 +193,7 @@ def test_input(config, sess, model, images, idx):
 
 
 # Generate model and train network
-def train(**kwargs):
+def notrain(**kwargs):
 
     config = getconfig(kwargs)
 
@@ -273,28 +218,16 @@ def train(**kwargs):
         convCnt = []
         perf = []
         trIm = []
-        wNR2 = []
-        wNR = []
-        wNI = []
-        wNO = []
-        hN = []
         wNormR2 = []
         wNormR = []
         wNormI = []
         wNormO = []
         hNorm = []
-        hm = []
         HM = []
         singVals = np.zeros([config['max_tasks'],100])
         images = images_all[0]
         firstConv = False
-
-        if config['projGrad']:
-            input_proj = tf.zeros((config['num_rnn'] + config['num_input'], config['num_rnn'] + config['num_input']))
-            activity_proj = tf.zeros((config['num_rnn'], config['num_rnn']))
-            output_proj = tf.zeros((config['num_rnn_out'], config['num_rnn_out']))
-            recurrent_proj = tf.zeros((config['num_rnn'], config['num_rnn']))
-        
+       
         test_perfs = {}
         for k in range(config['max_tasks']):
             test_perfs[k] = []
@@ -311,20 +244,11 @@ def train(**kwargs):
                 test_perfs['trials'].append(trial)
                 test_perfs['training_task'].append(len(convCnt))
 
-            # set optimizer for each new task
-            if config['projGrad'] and (images is None):
-                model.buildOpt(config, activity_proj=activity_proj, input_proj=input_proj, output_proj=output_proj, recurrent_proj=recurrent_proj, taskNumber=len(convCnt))
-            
-            if config['debug_timing']:
-                print("buildOpt", time.time()-t_start)
-
             # Generate a batch of trials
             images = images_all[len(convCnt)]
             stims, trials = generateData(config, images)
+            print(trials)
             trIm.extend(stims.tolist())
-
-            if config['debug_timing']:
-                print("generateData", time.time()-t_start)
 
             # Generate feed_dict
             feed_dict = {model.x: trials['x'],
@@ -332,24 +256,15 @@ def train(**kwargs):
                          model.y_rnn_mask: trials['y_rnn_mask']}
 
             # Run forward + backward passes
-            _, c_lsq, c_reg, wnR, wnR2, wnI, wnO, hn, hMax, out, maxSingVal, topTenSings = sess.run([model.optimizer_full, model.cost_lsq_rnn, model.cost_reg_rnn, model.wNormR, model.wNormR2, model.wNormI, model.wNormO, model.hNorm, model.hMax, model.y_hat, model.maxSingVal, model.topTenSings], feed_dict=feed_dict)
-
-            if config['debug_timing']:
-                print("sess.run", time.time()-t_start)
+            c_lsq = sess.run([model.cost_lsq_rnn], feed_dict=feed_dict)[0]
 
             # Save trial specific learning stats
             perf.append(c_lsq)
-            wNR.append(wnR)
-            wNR2.append(wnR2)
-            wNI.append(wnI)
-            wNO.append(wnO)
-            hN.append(hn)
-            hm.append(hMax)
 
             # Print summary stats
             runTime = time.time()-t_start
             if trial%100 == 0:
-                print('Trial: ' + str(trial) + ' cost: ' + str(np.mean(perf[-50:])) + ' cost_reg: ' + str(c_reg) + ' cost_lsq: ' + str(c_lsq) + ' Runtime: ' + str(runTime) + ' s')
+                print('Trial: ' + str(trial) + ' cost: ' + str(np.mean(perf[-50:])) + ' cost_lsq: ' + str(c_lsq) + ' Runtime: ' + str(runTime) + ' s')
                 sys.stdout.flush()
 
             # Check for convergence, set converged flagW, save model
@@ -358,80 +273,9 @@ def train(**kwargs):
             else:
                 taskFailed = False
             
-            if config['debug_timing']:
-                print("next bit", time.time()-t_start)
-
             # Saved trained model for new problem
-
-            if config['overtraining']:
-                condition = (len(perf) >= config['trialsPerTask']) or taskFailed
-            else:
-                condition = (len(perf) > 50 and np.mean(perf[-50:]) < 0.005) or taskFailed
+            condition = (len(perf) > 50) or taskFailed
             if condition:
-                if config['projGrad']:
-                    # Generate a batch of trials
-                    stims, trials = generateData(config, images)
-
-                    # Generate feed_dict
-                    feed_dict = {model.x: trials['x'],
-                                model.y_rnn: trials['y_rnn'],
-                                model.y_rnn_mask: trials['y_rnn_mask']}
-
-                    eval_h, eval_x, eval_y, Win, Wrec = sess.run([model.states, model.x, model.y_rnn, model.w_in, model.w_rec], feed_dict=feed_dict)
-                    eval_h = np.expand_dims(eval_h, axis=1)
-                    eval_x = np.tile(eval_x, (config['totalLength'],1,1))
-                    eval_y = np.expand_dims(eval_y, axis=1)
-
-                    full_state = np.concatenate([eval_x, eval_h], -1)
-                    Wfull = np.concatenate([Win, Wrec], 0)
-
-                    if config['debug_timing']:
-                        print("generation", time.time()-t_start)
-
-                    # joint covariance matrix of input and activity
-                    Shx_task = compute_covariance(np.reshape(full_state, (-1, config['num_rnn'] + config['num_input'])).T)
-                    if config['debug_timing']:
-                        print("Shx_task", time.time()-t_start)
-
-                    # covariance matrix of output
-                    Sy_task = compute_covariance(np.reshape(eval_y, (-1, config['num_rnn_out'])).T)
-                    if config['debug_timing']:
-                        print("Sy_task", time.time()-t_start)
-
-                    # get block matrices from Shx_task
-                    # Sh_task = Shx_task[-hp['n_rnn']:, -hp['n_rnn']:]
-                    Sh_task = np.matmul(np.matmul(Wfull.T, Shx_task), Wfull)
-                    if config['debug_timing']:
-                        print("Sh_task", time.time()-t_start)
-
-                    # ---------- update stored covariance matrices for continual learning -------
-                    taskNumber = len(convCnt)
-                    if taskNumber == 0:
-                        input_cov = Shx_task
-                        activity_cov = Sh_task
-                        output_cov = Sy_task
-
-                        if config['debug_clmult']:
-                            np.save('temp/eval_h.npy', eval_h)
-                            np.save('temp/eval_x.npy', eval_x)
-                            np.save('temp/eval_y.npy', eval_y)
-                            np.save('temp/Win.npy', Win)
-                            np.save('temp/Wrec.npy', Wrec)
-                            np.save('temp/full_state.npy', full_state)
-                            np.save('temp/Wfull.npy', Wfull)
-                            np.save('temp/Shx_task.npy', Shx_task)
-                            np.save('temp/Sy_task.npy', Sy_task)
-                            np.save('temp/Sh_task.npy', Sh_task)
-                    else:
-                        input_cov = taskNumber / (taskNumber + 1) * input_cov + Shx_task / (taskNumber + 1)
-                        activity_cov = taskNumber / (taskNumber + 1) * activity_cov + Sh_task / (taskNumber + 1)
-                        output_cov = taskNumber / (taskNumber + 1) * output_cov + Sy_task / (taskNumber + 1)
-
-                    # ---------- update projection matrices for continual learning ----------
-                    activity_proj, input_proj, output_proj, recurrent_proj = compute_projection_matrices(activity_cov, input_cov, output_cov, input_cov[-config['num_rnn']:, -config['num_rnn']:], config["alpha_projection"])
-                    if config['debug_timing']:
-                        print("compute_proj_matrices", time.time()-t_start)
-
                 if taskFailed: # Update problem learning-specific stats when convergence fails
                     convCnt.append(np.nan)
                     wNormR.append(np.nan)
@@ -456,18 +300,12 @@ def train(**kwargs):
                                 pickle.dump(test_perfs, file)
 
                     # Save problem learning-specific stat summary
-                    wNormR.append(np.mean(wNR[-50:]))
-                    wNormR2.append(np.mean(wNR2[-50:]))
-                    wNormI.append(np.mean(wNI[-50:]))
-                    wNormO.append(np.mean(wNO[-50:]))
-                    hNorm.append(np.mean(hN[-50:]))
-                    HM.append(max(hm[-50:]))
                     np.savetxt(os.path.join('data', config['save_dir'], 'trIms', str(len(convCnt)) + '.txt'), np.array(trIm), fmt='%f', delimiter=' ')
 
-                    # Set firing rate homeostatic set point after first problem is learned
-                    if firstConv == False:
-                        firstConv = True
-                        model.updateRegularizerTargets(hNorm[-1], wNormR[-1], wNormI[-1], sess)
+                    # # Set firing rate homeostatic set point after first problem is learned
+                    # if firstConv == False:
+                    #     firstConv = True
+                    #     model.updateRegularizerTargets(hNorm[-1], wNormR[-1], wNormI[-1], sess)
 
                     if config['runType'] != runType.Full:  # for manifold perturbation only
                         if len(convCnt) == 1:
@@ -484,62 +322,11 @@ def train(**kwargs):
                     with open(os.path.join('data', config['save_dir'], 'conv.txt'), 'a') as f:
                         # tested and works on np.nan
                         f.write(f'{convCnt[-1]:f}\n')
-                    with open(os.path.join('data', config['save_dir'], 'wNormR.txt'), 'a') as f:
-                        f.write(f'{wNormR[-1]:12.9f}\n')
-                    with open(os.path.join('data', config['save_dir'], 'wNormR2.txt'), 'a') as f:
-                        f.write(f'{wNormR2[-1]:12.9f}\n')
-                    with open(os.path.join('data', config['save_dir'], 'wNormI.txt'), 'a') as f:
-                        f.write(f'{wNormI[-1]:12.9f}\n')
-                    with open(os.path.join('data', config['save_dir'], 'wNormO.txt'), 'a') as f:
-                        f.write(f'{wNormO[-1]:12.9f}\n')
-                    with open(os.path.join('data', config['save_dir'], 'hNorm.txt'), 'a') as f:
-                        f.write(f'{hNorm[-1]:12.9f}\n')
-                    with open(os.path.join('data', config['save_dir'], 'HM.txt'), 'a') as f:
-                        f.write(f'{HM[-1]:12.9f}\n')
                     with open(os.path.join('data', config['save_dir'], 'SINGS.txt'), 'a') as f:
                         f.write('  '.join([f'{val:12.9f}' for val in singVals[len(convCnt)-1]]) + '\n')
                 
-                if config['debug_timing']:
-                    print("block1", time.time()-t_start)
-
-                if config['runType'] != runType.Full:  # for manifold perturbation only
-                    st0 = getStates(sess, config, model, images)
-                    if len(convCnt) <= config['manifold_perturbation_threshold']:
-                        X = st0[0]
-                        print('Size: ' + str(X.shape))
-                        saveStates[:,:,len(convCnt)-1] = X.T
-                        X = st0[1]
-                        saveStates[:,:,len(convCnt)-1+config['manifold_perturbation_threshold']] = X.T
-                        
-                # Summarize and print learning stats for learned problem
-                print('Converged in: ' + str(convCnt[-1]) + ' ' + str(len(convCnt)) + ' (' + str(
-                    wNormR[-1]) + ' ' +  str(wNormR2[-1]) + ' ('+ str(maxSingVal) +'), ' + str(wNormI[-1]) + ', ' + str(wNormO[-1]) + ') (' + str(hNorm[-1]) + ', ' + str(HM[-1]) + ') ' + str(np.mean(perf[-50:]))+ ' ' + str(topTenSings) )
-                print('Sing Dev: ' + str(np.sum(np.abs(singVals[0,:]-currSingVals[0]))))
-
-                if config['runType'] != runType.Full:  # for manifold perturbation only
-                    if len(convCnt) == config['manifold_perturbation_threshold']:
-                        np.save(os.path.join('data', config['save_dir'], 'states'), saveStates)
-
-                        model.restore(1)
-                        oldWts, dEigs, sEigs = resetOutWeightsWithSameStruct(sess, model, config, 4, config['runType'], states=saveStates)
-                        model.removeTrainable(['out_RNN_weights', 'out_RNN_biases'], config)
-                        model.printTrainable()
-
-                    if len(convCnt) >= config['manifold_perturbation_threshold']:
-                        print(str(convCnt[-1]))
-                        model.restore(1)
-                        resetOutWeightsWithSameStruct(sess, model, config, 4, config['runType'], eigs=dEigs, eigsS=sEigs)
-                        model.printTrainable()
-                
                 sys.stdout.flush()
 
-                # The orthogonalization code runs if this is commented out (otherwise I get an error about the graph already being finalized.)
-                # It seems like it's okay to comment out as long as the code runs on a single thread?
-                # https://www.tensorflow.org/api_docs/python/tf/Graph#finalize
-                # if config['runType'] == runType.Full:
-                #     # Finalize graph after homeostatic set point is set
-                #     if len(convCnt) == 1:
-                #         sess.graph.finalize()
 
                 # Reset problem specific stats for new problem
                 perf = []
@@ -554,9 +341,6 @@ def train(**kwargs):
                 
                 # Reset adam's internals before onset of learning new problem
                 model.resetOpt(sess)
-
-                if config['debug_timing']:
-                    print("end", time.time()-t_start)
 
             # Done learning all problems?
             if len(convCnt) >= config['max_tasks']:

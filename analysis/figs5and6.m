@@ -1,19 +1,37 @@
 clear
 close all
 
-useSaved = false;
+useSaved = true;
 
-dir = '../data/2023-08-01T17:43:58_plain';
+% dir = '../data/2023-08-01T17:43:58_plain';
 % dir = '../data/2023-08-01T17:44:08_proj';
 
-numNet = 1;
-numTasks = 1001; 
+dirs_sets = {
+    {'2023-11-19T00:18:02_plains0', '2023-10-07T23:34:02_plains1', '2023-10-07T23:34:37_plains2'};
+    {'2023-10-11T23:36:53_lcp7.5s0', '2023-10-11T23:37:04_lcp7.5s1', '2023-10-11T23:37:14_lcp7.5s2'};
+    {'2023-10-12T21:24:49_lcp6.0s0', '2023-10-12T21:25:04_lcp6.0s1', '2023-10-12T21:25:13_lcp6.0s2'};
+    {'2023-10-23T11:31:41_lcp5.5s0', '2023-10-23T11:32:16_lcp5.5s1', '2023-10-23T11:32:45_lcp5.5s2'};
+};
+names = {'plain', 'lcp7-5', 'lcp6-0', 'lcp5-5'};
+
+dirs_idx = 1;
+dirs = dirs_sets{dirs_idx};
+name = names{dirs_idx};
+
+dir = '2023-11-19T00:18:02_plains0';
+
+numNet = 3;
+numTasks = 31; 
 
 dt = 1.0;
 tau = 100.0;
 alphax = dt/tau;
 N = 100;
 T = 2;
+
+probsPerGroup = 2; % default 50
+numEp = 15; % default 20
+halfway = (numTasks-1)/2; % default 500
 
 if useSaved == false
     
@@ -23,16 +41,17 @@ if useSaved == false
         VFC = zeros(numTasks-1,9); % to save vector field change magnitude measurements
         % to save vector field change dimensionality measurements
         dims_SingProb = zeros(numTasks-1,2,2);
-        dims_SingEp = zeros(20,2,2);
+        dims_SingEp = zeros(numEp,2,2);
         dimsT_SingProb = zeros(numTasks-1,1);
-        dimsT_SingEp = zeros(20,1);
+        dimsT_SingEp = zeros(numEp,1);
         
         tc=0;
         % loop through problems in groups of 50 at a time
-        for ep = 1:20
+        for ep = 1:numEp
+
+            disp(strcat('ep: ', int2str(ep)))
             
-            % tasks = ((ep-1)*50+2):(ep*50 +1);
-            tasks = 2:30;
+            tasks = ((ep-1)*probsPerGroup+2):(ep*probsPerGroup +1);
 
             comps = zeros(2, 2, N, 50, 2, int32(2000/dt));
             compsT = zeros(N, 50, 2, int32(2000/dt));
@@ -44,7 +63,7 @@ if useSaved == false
                 t_ec = t_ec+1;
                 [task tc t_ec]
                 
-                file_path = sprintf('%s/saved/%d.mat', dir, task-1);
+                file_path = sprintf('../data/%s/saved/%d.mat', dirs{net}, task-1);
                 load(file_path);
                 wts_RNNin_weights = wts_leakyRNN_kernel(1:11, :);
                 wts_leakyRNN_weights = wts_leakyRNN_kernel(12:end, :);
@@ -54,7 +73,7 @@ if useSaved == false
                 RW0 = double(wts_leakyRNN_weights);
                 RB0 = double(wts_leakyRNN_biases);
                 
-                file_path = sprintf('%s/saved/%d.mat', dir, task);
+                file_path = sprintf('../data/%s/saved/%d.mat', dirs{net}, task);
                 load(file_path);
                 wts_RNNin_weights = wts_leakyRNN_kernel(1:11, :);
                 wts_leakyRNN_weights = wts_leakyRNN_kernel(12:end, :);
@@ -192,17 +211,17 @@ if useSaved == false
             
         end
         % Correlate weight change magnitude with learning performance
-        C = load(sprintf('%s/conv_%d_%s.txt',dir,net-1,suff));
+        C = load(sprintf('../data/%s/conv.txt',dirs{net}));
         C = C(2:end, 1);
         corrs = [corrs; corr(VFC(:,2),C) corr(VFC(:,3),C) corr(VFC(:,4),C)];
         
         %Summarize quantities by problem group for plotting
-        VFC_sum = zeros(20, 9);
-        dims_SingProb_sum = zeros(20,2,2);
-        dimsT_SingProb_sum = zeros(20,1);
+        VFC_sum = zeros(numEp, 9);
+        dims_SingProb_sum = zeros(numEp,2,2);
+        dimsT_SingProb_sum = zeros(numEp,1);
         
-        for ep = 1:20
-            tasks = ((ep-1)*50+1):(ep*50);
+        for ep = 1:numEp
+            tasks = ((ep-1)*probsPerGroup+1):(ep*probsPerGroup);
             VFC_sum(ep, :) = mean(VFC(tasks,:),1);
             dims_SingProb_sum(ep, :, :) = mean(dims_SingProb(tasks, :, :),1);
             dimsT_SingProb_sum(ep) = mean(dimsT_SingProb(tasks));
@@ -240,18 +259,20 @@ if useSaved == false
         plot(VFC_sum(:, [2 6 7]))
         subplot(2, 6, 11)
         plot(VFC_sum(:, [3 8 9]))
-        save(sprintf('../results/f5And6_seed_%d', net-1), 'C', 'VFC', 'VFC_sum', 'dims_SingEp','dimsT_SingEp', 'dims_SingProb_sum', 'dimsT_SingProb_sum');
+        save(sprintf('../results/f5And6_seed_%d_%s.mat', net-1, name), 'C', 'VFC', 'VFC_sum', 'dims_SingEp','dimsT_SingEp', 'dims_SingProb_sum', 'dimsT_SingProb_sum');
+
+        saveas(gca, sprintf('../results/f5and6_seed_%d_%s.pdf', net-1, name), 'pdf')
     end
-    save('../results/f5And6_All', 'corrs');
+    save(sprintf('../results/f5And6_All_%s.mat', name), 'corrs');
 end
 
 % Summarize data for plots
 dZDecMag = zeros(10, 2, 3);
 dZDecDim = zeros(10, 2, 2);
 dW_VFC = zeros(10, 1);
-dMag = zeros(10,20,3);
-for net = 1:10
-    load(sprintf('../results/f5And6_seed_%d', net-1));
+dMag = zeros(10,numEp,3);
+for net = 1:numNet
+    load(sprintf('../results/f5And6_seed_%d_%s.mat', net-1, name));
     dZDecMag(net, 1, 1) = VFC_sum(1, 5);
     dZDecMag(net, :, 2) = VFC_sum(1, 6:7)';
     dZDecMag(net, :, 3) = VFC_sum(1, 8:9)';
@@ -259,14 +280,14 @@ for net = 1:10
     dZDecDim(net, 1, 1:2) = dims_SingProb_sum(1,1,1:2);
     dZDecDim(net, 2, 1:2) = dims_SingEp(1,1,1:2);
 
-    dW_VFC(net) = corr(VFC(1:500,4), C(1:500))^2;
+    dW_VFC(net) = corr(VFC(1:halfway,4), C(1:halfway))^2;
     
     X = VFC_sum(:,[4, 1, 2]);
-    X = X./repmat(X(1,:), 20, 1);
+    X = X./repmat(X(1,:), numEp, 1);
     dMag(net,:,:) = X;
 
 end
-load('../results/f5And6_All');
+load(sprintf('../results/f5And6_All_%s.mat', name));
 % dW_VFC = corrs(:,3);
 
 figure;
@@ -320,11 +341,16 @@ set(gca,'xtick',[1 2])
 set(gca,'xticklabel',{'Single(perp)', 'Group(perp)'})
 ylim([0 14])
 
+fig1 = figure(1);
+fig1.WindowState = 'maximized';
+orient(fig1,'landscape')
+saveas(fig1, sprintf('../results/f5and6_all_1_%s.pdf', name), 'pdf')
 
 figure;
 subplot(1,3,1)
-load(sprintf('../results/f5And6_seed_%d', 3));
-plot(VFC(1:500,4), C(1:500), 'o')
+% load(sprintf('../results/f5And6_seed_%d', 3));
+load(sprintf('../results/f5And6_seed_%d', 0));
+plot(VFC(1:halfway,4), C(1:halfway), 'o')
 box off
 set(gca,'fontsize',20)
 set(gca,'linewidth',2)
@@ -344,7 +370,8 @@ ylim([40 100])
 set(gca,'xtick',[])
 
 subplot(1,3,3)
-errorbar(repmat([25:50:1000]',1,3), squeeze(mean(dMag,1)), squeeze(std(dMag,0,1))./sqrt(10), 'linewidth',2)    
+% errorbar(repmat([25:50:1000]',1,3), squeeze(mean(dMag,1)), squeeze(std(dMag,0,1))./sqrt(10), 'linewidth',2)    
+errorbar(repmat([1:probsPerGroup:numTasks-1]',1,3), squeeze(mean(dMag,1)), squeeze(std(dMag,0,1))./sqrt(10), 'linewidth',2)
 box off
 set(gca,'fontsize',20)
 set(gca,'linewidth',2)
@@ -352,3 +379,8 @@ xlabel('Problems')
 ylabel('Normalized magnitude')
 legend('delta(W_{rec})','delta(Curr.)','W-d VFC')
 legend boxoff
+
+fig1 = figure(1);
+fig1.WindowState = 'maximized';
+orient(fig1,'landscape')
+saveas(fig1, sprintf('../results/f5and6_all_2_%s.pdf', name), 'pdf')

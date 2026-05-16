@@ -148,11 +148,12 @@ class customRNNCell(object):
                 new_states = (1.0 - self._alpha) * states + \
                             self._alpha * self._activation(tf.matmul(array_ops.concat([stims, states], 1), self._kernel) + self._bias + new_noise)
 
-                if self.config["lcpSampling"]:
+                # if self.config["lcpSampling"]:
                     # sample = tf.random.normal(shape=states0.shape)
                     # directional_output = tf.reduce_sum(sample * new_states)
                     # directional_gradient = tape.gradient(directional_output, states0)
                     # gradient = directional_gradient
+                if self.config["lcpSampling"]:
                     jacobian_matrix = tape.jacobian(new_states, states0)
                     sample = tf.random.normal(shape=new_states.shape)
                     dh = tf.tensordot(jacobian_matrix, sample, axes=[[0, 1], [0, 1]])
